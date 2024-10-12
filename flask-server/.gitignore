@@ -1,0 +1,14 @@
+# Ignore Python bytecode files
+*.pyc
+__pycache__/
+
+# Ignore environment files
+.env
+
+# Ignore virtual environment directories
+venv/
+.env/
+
+upload_chats.py
+sample_chat_data.json
+sample_chat_data_2.json

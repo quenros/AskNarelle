@@ -1,0 +1,143 @@
+[
+    {
+      "username": "user1",
+      "course": "Mathematics",
+      "emotion": "joy",
+      "sentiment": "Positive",
+      "timestamp": "2024-07-30T14:23:00Z"
+    },
+    {
+      "username": "user2",
+      "course": "History",
+      "emotion": "sadness",
+      "sentiment": "Negative",
+      "timestamp": "2024-07-30T15:45:00Z"
+    },
+    {
+      "username": "user3",
+      "course": "Biology",
+      "emotion": "love",
+      "sentiment": "Positive",
+      "timestamp": "2024-07-30T16:12:00Z"
+    },
+    {
+      "username": "user4",
+      "course": "Physics",
+      "emotion": "anger",
+      "sentiment": "Negative",
+      "timestamp": "2024-07-30T17:05:00Z"
+    },
+    {
+      "username": "user5",
+      "course": "Chemistry",
+      "emotion": "fear",
+      "sentiment": "Negative",
+      "timestamp": "2024-07-30T18:30:00Z"
+    },
+    {
+      "username": "user6",
+      "course": "Art",
+      "emotion": "surprise",
+      "sentiment": "Positive",
+      "timestamp": "2024-07-30T19:45:00Z"
+    },
+    {
+      "username": "user7",
+      "course": "Literature",
+      "emotion": "joy",
+      "sentiment": "Positive",
+      "timestamp": "2024-07-30T20:00:00Z"
+    },
+    {
+      "username": "user8",
+      "course": "Philosophy",
+      "emotion": "sadness",
+      "sentiment": "Negative",
+      "timestamp": "2024-07-30T21:10:00Z"
+    },
+    {
+      "username": "user9",
+      "course": "Engineering",
+      "emotion": "love",
+      "sentiment": "Positive",
+      "timestamp": "2024-07-30T22:20:00Z"
+    },
+    {
+      "username": "user10",
+      "course": "Computer Science",
+      "emotion": "anger",
+      "sentiment": "Negative",
+      "timestamp": "2024-07-30T23:30:00Z"
+    },
+    {
+      "username": "user11",
+      "course": "Mathematics",
+      "emotion": "fear",
+      "sentiment": "Negative",
+      "timestamp": "2024-07-31T00:40:00Z"
+    },
+    {
+      "username": "user12",
+      "course": "History",
+      "emotion": "surprise",
+      "sentiment": "Positive",
+      "timestamp": "2024-07-31T01:50:00Z"
+    },
+    {
+      "username": "user13",
+      "course": "Biology",
+      "emotion": "joy",
+      "sentiment": "Positive",
+      "timestamp": "2024-07-31T02:00:00Z"
+    },
+    {
+      "username": "user14",
+      "course": "Physics",
+      "emotion": "sadness",
+      "sentiment": "Negative",
+      "timestamp": "2024-07-31T03:10:00Z"
+    },
+    {
+      "username": "user15",
+      "course": "Chemistry",
+      "emotion": "love",
+      "sentiment": "Positive",
+      "timestamp": "2024-07-31T04:20:00Z"
+    },
+    {
+      "username": "user16",
+      "course": "Art",
+      "emotion": "anger",
+      "sentiment": "Negative",
+      "timestamp": "2024-07-31T05:30:00Z"
+    },
+    {
+      "username": "user17",
+      "course": "Literature",
+      "emotion": "fear",
+      "sentiment": "Negative",
+      "timestamp": "2024-07-31T06:40:00Z"
+    },
+    {
+      "username": "user18",
+      "course": "Philosophy",
+      "emotion": "surprise",
+      "sentiment": "Positive",
+      "timestamp": "2024-07-31T07:50:00Z"
+    },
+    {
+      "username": "user19",
+      "course": "Engineering",
+      "emotion": "joy",
+      "sentiment": "Positive",
+      "timestamp": "2024-07-31T08:00:00Z"
+    },
+    {
+      "username": "user20",
+      "course": "Computer Science",
+      "emotion": "sadness",
+      "sentiment": "Negative",
+      "timestamp": "2024-07-31T09:10:00Z"
+    }
+  ]
+  
