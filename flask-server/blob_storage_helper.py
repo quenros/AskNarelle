@@ -99,7 +99,6 @@ def delete_from_azure_blob_storage(containerName, blobName, domainName, versionI
         blob_client = container_client.get_blob_client(blobName_domain)
        
         blob_client_new = container_client.get_blob_client(blobName_new)
-        print('hey')
         if blob_client_new.exists():
             blob_client_new.delete_blob()
         # Delete the blob

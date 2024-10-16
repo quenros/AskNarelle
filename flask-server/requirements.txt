@@ -14,3 +14,6 @@ pytz
 python-docx
 PyMuPDF
 gunicorn
+dnspython
+
+

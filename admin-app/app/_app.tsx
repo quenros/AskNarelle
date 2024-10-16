@@ -16,7 +16,6 @@ import { msalConfig } from "@/authConfig";
 export const msalInstance = new PublicClientApplication(msalConfig);
 
 msalInstance.initialize().then(() => {
-  // Account selection logic is app dependent. Adjust as needed for different use cases.
   const accounts = msalInstance.getAllAccounts();
   if (accounts.length > 0) {
     msalInstance.setActiveAccount(accounts[0]);
@@ -25,8 +24,7 @@ msalInstance.initialize().then(() => {
   msalInstance.addEventCallback((event: EventMessage) => {
     if (event.eventType === EventType.LOGIN_SUCCESS) {
       console.log("login success")
-      // Check if event.payload is of type AuthenticationResult
-      const payload = event.payload as AuthenticationResult; // Type assertion
+      const payload = event.payload as AuthenticationResult; 
       if (payload.account) {
         msalInstance.setActiveAccount(payload.account);
       }

@@ -2,6 +2,7 @@ import msal
 from dotenv import load_dotenv
 import os
 
+
 load_dotenv()
 
 tenant_id = os.environ.get('TENANT_ID')
@@ -16,4 +17,8 @@ def get_access_token():
     )
     result = app.acquire_token_for_client(scopes=scope)
     return result.get("access_token")
+
+
+
+
 

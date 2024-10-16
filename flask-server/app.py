@@ -540,8 +540,8 @@ def invite_user():
     if not email:
         return jsonify({'error': 'Email is required'}), 400
     
-    if not email.endswith("ntu.edu.sg"):
-        return jsonify({'error': 'Invalid email domain. Only NTU email is allowed.'}), 400
+    # if not email.endswith("ntu.edu.sg"):
+    #     return jsonify({'error': 'Invalid email domain. Only NTU email is allowed.'}), 400
 
 
     token = get_access_token()
@@ -565,7 +565,6 @@ def invite_user():
 
         # Check if the user exists
         if len(user_data.get('value', [])) > 0:
-            print("Here1")
             upload_status = upload_course(courseName, email)
             if(upload_status):
                 return jsonify({'message': 'User added to access this course'}), 201
@@ -574,7 +573,6 @@ def invite_user():
 
           
         else:
-            print("Here2")
             invite_url = graph_url + 'invitations'
             invite_body = {
                 "invitedUserEmailAddress": email,
@@ -583,7 +581,8 @@ def invite_user():
             }
             
             invite_response = requests.post(invite_url, headers=headers, json=invite_body)
-            
+            print(invite_response.text)
+            print(invite_response.status_code)
             if invite_response.status_code == 201:
                 upload_course(courseName, email)
                 return jsonify({'message': 'Invitation sent successfully!'}), 201

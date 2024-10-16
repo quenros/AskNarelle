@@ -141,13 +141,16 @@ def add_activity(activities):
 def view_activities(username):
     course_list = []
     result = []
+    activities = []
     try:
         documents = list(db["courses"].find({"user": username, "user_type": "root_user"}))
         for doc in documents:
             course_list.append(doc['course_name'])
         
+        print(course_list)
         for course in course_list:
-            activities = list(db["activity_log"].find({"course_name": course}))
+            activities = activities+list(db["activity_log"].find({"course_name": course}))
+            
          
         print(activities)
         for activity in activities:
