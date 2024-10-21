@@ -8,10 +8,11 @@ import { IoFolderOutline } from "react-icons/io5";
 interface CourseProps{
     courseName: string,
     domainName: string,
-    onDomainDeleted: (courseName: string, domainName: string) => void
+    onDomainDeleted: (courseName: string, domainName: string) => void,
+    user_type: string
 }
 
-const DomainCard: React.FC<CourseProps> = ({courseName, domainName, onDomainDeleted}) => {
+const DomainCard: React.FC<CourseProps> = ({courseName, domainName, onDomainDeleted, user_type}) => {
 
   const router = useRouter();
   const[totalFiles, setTotalFiles] = useState<number>(0); 
@@ -38,13 +39,21 @@ const DomainCard: React.FC<CourseProps> = ({courseName, domainName, onDomainDele
       <div className='bg-[#2C3463] rounded-lg py-2 flex justify-center w-10'>
         <IoFolderOutline color='white' size={20} />
       </div>
-      <div onClick={(e) => {
+      { user_type==="root_user" ? 
+      (
+        <div onClick={(e) => {
           e.stopPropagation(); 
           onDomainDeleted(courseName, domainName);
           }
         } className='cursor-pointer mb-3 p-2 rounded-full hover:bg-gray-300 transition-colors duration-200 ease-in-out'>
         <RiDeleteBin6Line color='#2C3463' size={20} />
       </div>
+
+
+      ) : <></>
+        
+      }
+     
     </div>
     <div className='mt-3'>
       <div className='text-[#2C3463] font-semibold font-nunito'>{domainName}</div>

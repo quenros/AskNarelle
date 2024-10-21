@@ -85,12 +85,12 @@ const DocumentPopup: React.FC<PopupProps> = ({ onClose, onFileCreated, collectio
     // formData.append('chunkSize', chunkSize.toString())
     // formData.append('overlap', overlap.toString())
     setProgress('Uploading To File Storage')
-    fetch(`http://127.0.0.1:5000/api/${collectionName}/${domainName}/${username}/createdocument`, {
+    fetch(`http://127.0.0.1:5000/api/${collectionName}/${domainName}/${username}/createblob`, {
           method: 'PUT',
            body: formData
       })
-    .then(response => {
-        if (response.ok) {
+    .then(blobResponse => {
+        if (blobResponse.ok) {
           setProgress('Uploading To Vector Store')
           return fetch('http://127.0.0.1:5000/vectorstore', {
             method: 'PUT',
@@ -103,20 +103,35 @@ const DocumentPopup: React.FC<PopupProps> = ({ onClose, onFileCreated, collectio
               overlap: overlap,
              })
           })
-          .then(flaskResponse => {
-            if (flaskResponse.ok) {
-              console.log('Data loaded into vectorstore successfully:');
-              setUploadSuccess(true)
-            } 
-            else{
-              const errorMessage = flaskResponse.text().then(message => {console.log(message)});
-              alert(`Internal Server Error: ${flaskResponse.statusText}, Details: ${errorMessage}`);
-              throw new Error(`Failed to load into vector store: ${errorMessage}`);      
+          .then(vectorResponse => {
+            if (vectorResponse.ok) {
+              setProgress('Uploading To database')
+              return fetch(`http://127.0.0.1:5000/api/${collectionName}/${domainName}/${username}/createdocument`, {
+                method: 'PUT',
+                body: formData
+              })
+              .then(dbResponse => {
+                if(dbResponse.ok){
+                  console.log("Document uploded successfully into the database")
+                  setUploadSuccess(true)
+
+                }
+                else{
+                  const errorMessage = vectorResponse.text().then(message => {console.log(message)});
+                  alert(`Internal Server Error: ${vectorResponse.statusText}, Details: ${errorMessage}`);
+                  throw new Error(`Failed to load into vector store: ${errorMessage}`);      
+                }
+              })
+
             }
+            else{
+              throw new Error('Failed to load data into vector store');
+            } 
+           
           })
         } 
-        else if(response.status === 400) {
-          setIsInValid(true)
+        else if (blobResponse.status === 400) {
+          setIsInValid(true);
         }
         else {
           throw new Error('Failed to create document');

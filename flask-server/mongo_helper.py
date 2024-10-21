@@ -24,6 +24,7 @@ chatlogs_db = chat_client['chathistory-storage']
 
 
 def upload_course(course_name, username):
+    username = username.lower()
     try:
         query_docs = db["courses"].find({"course_name": course_name})
         query_docs = list(query_docs)
@@ -77,6 +78,16 @@ def delete_domain_docs(course_name, domain_name):
 def upload_domain(domain_name, course_name):
     print("course_name", course_name)
     try:
+        # Check if the domain already exists for the given course
+        existing_doc = db["uploaded_files"].find_one(
+            {"domain": domain_name, "course_name": course_name}
+        )
+        
+        if existing_doc:
+            print("Error: The category already exists for this course.")
+            return False, "The category already exists for this course."
+        
+        # Prepare the document to be uploaded
         doc = {
             "course_name": course_name,
             "domain": domain_name,
@@ -88,17 +99,16 @@ def upload_domain(domain_name, course_name):
             "time_str": 'null',
             "in_vector_store": 'null',
             "is_root_blob": 'null',
-        }  
-        db["uploaded_files"].update_one(
-            {"domain": domain_name, "name": 'null', "course_name": course_name},
-            {"$set": doc},           
-            upsert=True             
-        )
-        print("uploaded successfully")
-        return True
+        }
+        
+        # Insert the document
+        db["uploaded_files"].insert_one(doc)
+        
+        print("Uploaded successfully")
+        return True, "Uploaded successfully"
     except Exception as e:
         print(f"An error occurred: {e}")
-        return False
+        return False, str(e)
         
 
     
@@ -142,6 +152,7 @@ def view_activities(username):
     course_list = []
     result = []
     activities = []
+    username = username.lower()
     try:
         documents = list(db["courses"].find({"user": username, "user_type": "root_user"}))
         for doc in documents:
@@ -204,6 +215,7 @@ def get_collections():
 
 def list_courses(username):
     courses_list = []
+    username = username.lower()
     try:
         documents = list(db["courses"].find({"user": username}))
         # Convert ObjectId to string
@@ -216,17 +228,23 @@ def list_courses(username):
     
 def get_domain_files(username,course_name):
     domains_list = []
+    usertype = ''
     try:
         documents = list(db["courses"].find({"course_name": course_name}))
 
         if(len(documents) > 0):
             documents = list(db["courses"].find({"course_name": course_name, "user": username}))
-
+            usertype = documents[0]['user_type']
+            print(usertype)
             if(len(documents) > 0):
                 documents = list(db["uploaded_files"].find({"name": "null","course_name": course_name}))
                 for doc in documents:
-                    doc['_id'] = str(doc['_id'])   
-                    domains_list.append(doc['domain'])
+                    doc['_id'] = str(doc['_id']) 
+                    doc_to_append = {
+                        'domain': doc['domain'],
+                        'usertype': usertype
+                    }  
+                    domains_list.append(doc_to_append)
                 return domains_list
             else:
                 return "403"
@@ -237,6 +255,7 @@ def get_domain_files(username,course_name):
         return "False"
     
 def get_documents(username,course_name, domain_name):
+    username = username.lower()
     try:
         documents = list(db["courses"].find({"course_name": course_name}))
 
@@ -319,6 +338,7 @@ def get_domain_files_count(course_name, domain_name):
         return "False"
     
 def get_users_count(username):
+    username = username.lower()
     try:
         users = 0
         user_courses_docs = list(db["courses"].find({"user": username }))
@@ -333,6 +353,7 @@ def get_users_count(username):
 
 
 def get_queries_count(username):
+    username = username.lower()
     try:
         queries_count = 0
         user_course_queries = list(db["courses"].find({"user": username }))
@@ -345,6 +366,7 @@ def get_queries_count(username):
         return "False"
     
 def get_queries_by_month(username):
+    username = username.lower()
     now = datetime.now()
     start_date = now - timedelta(days=365)
 
@@ -415,6 +437,7 @@ def get_queries_by_month(username):
         return "False"
     
 def get_queries_by_course(username):
+    username = username.lower()
      
     courses_to_include = []
     courses = []
@@ -459,6 +482,7 @@ def get_queries_by_course(username):
         return "False"
 
 def get_user_sentiments(username):
+    username = username.lower()
     courses_to_include = []
     counts = []
     sentiments = []
@@ -516,6 +540,8 @@ def get_user_sentiments(username):
 
     
 def get_user_emotions(username):
+
+    username = username.lower()
 
     courses_to_include = []
     emotions = []

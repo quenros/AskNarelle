@@ -102,7 +102,7 @@ def create_domain():
 
     domain_name = domain_name.lower().replace(' ', '-')
     try:
-        upload_domain_success = upload_domain(domain_name, collection_name)
+        upload_domain_success, message = upload_domain(domain_name, collection_name)
         if upload_domain_success:
             timestamp_dt = utc.localize(datetime.utcnow())
             local_tz = timezone('Asia/Singapore')
@@ -128,7 +128,7 @@ def create_domain():
                 return jsonify({"message": "Activity was not added successfully"}), 500
             
         else:
-            return jsonify({"message": "Failed to create domain"}), 500
+            return jsonify({"message": message}), 400
         
     except Exception as error:
         return jsonify({'error': 'Internal server error'}), 500 
@@ -141,6 +141,7 @@ def get_containers(username):
 
 @app.route('/api/collections/<username>/<collection_name>/domains', methods=['GET'])
 def get_domains(username,collection_name):
+    username = username.lower()
     domain_status = get_domain_files(username,collection_name)
 
     if domain_status == "403":
@@ -167,82 +168,91 @@ def get_files(username,collection_name, domain_name):
         return jsonify(documents_status), 201
 
 
-@app.route('/api/<collection_name>/<domain_name>/<username>/createdocument', methods=['PUT'])
-def upload_document(collection_name, domain_name, username):
+@app.route('/api/<collection_name>/<domain_name>/<username>/createblob', methods=['PUT'])
+def upload_blob(collection_name, domain_name, username):
     files = request.files.getlist('files')
     container_name = collection_name.lower().replace(' ', '-')
     allowed_extensions = {'.pdf', '.docx', '.txt', '.pptx'}
-    files_with_links = []
-    activities = []
+   
 
     for file in files:
         if(os.path.splitext(file.filename)[1].lower() not in allowed_extensions):
             return jsonify({'error': 'Invalid files'}), 400
     try:
         # now_utc = datetime.now(pytz.utc)
-        container_client = blob_service_client.get_container_client(collection_name)
+       
         upload_success = upload_to_azure_blob_storage(container_name, files, domain_name)
         if upload_success:
-            for file in files:
-                blob_client_direct = container_client.get_blob_client(f"{domain_name}/{file.filename}")
-                blob_version = blob_client_direct.get_blob_properties().version_id
-                main_part, fractional_part = blob_version[:-1].split('.')
-                fractional_part = fractional_part[:6] 
-                adjusted_timestamp_str = f"{main_part}.{fractional_part}Z"
-                timestamp_dt = datetime.strptime(adjusted_timestamp_str, '%Y-%m-%dT%H:%M:%S.%fZ')
-                timestamp_dt = utc.localize(timestamp_dt)
+            return jsonify({'message': 'Files uploaded succesfully to Azure Blob Storage'}), 201
 
-                local_tz = timezone('Asia/Singapore')
-                local_timestamp_dt = timestamp_dt.astimezone(local_tz)
-              
-                date_str = local_timestamp_dt.date().isoformat()
-                time_str = local_timestamp_dt.strftime('%H:%M:%S')
-
-                print(date_str)
-                print(time_str)
-
-                print(f"this is blob version: {blob_version}")
-                sas_token = generate_sas_token(container_name, f'{domain_name}/{file.filename}')
-                blob_url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{container_name}/{f'{domain_name}/{file.filename}'}?{sas_token}"
-                files_with_links.append({
-                    "course_name" : container_name,
-                    "domain": domain_name,
-                    "name": file.filename,
-                    "url": blob_url,
-                    "blob_name": f'{domain_name}/{file.filename}',
-                    "version_id": blob_version,
-                    "date_str": date_str,
-                    "time_str": time_str,
-                    "in_vector_store": 'yes',
-                    "is_root_blob": 'yes',
-                   
-                })
-                activities.append({
-                    "uername": username,
-                    "course_name": collection_name,
-                    "domain": domain_name,
-                    "file": file.filename,
-                    "action": "Uploaded File",
-                    "date_str": date_str,
-                    "time_str": time_str
-                })
-            create_document_success = create_document(files_with_links)
-            if create_document_success:
-                add_activity_status = add_activity(activities)
-                if add_activity_status:
-                   return jsonify({"message": "Documents created successfully!"}), 201
-                else:
-                    return jsonify({'error': 'Failed to upload activity status'}), 500
-            else:
-                return jsonify({'error': 'Failed to create documents'}), 500
         else:
             return jsonify({'error': 'Failed to upload files to Azure Blob Storage'}), 500
     except Exception as error:
             print(f"Error processing files upload: {error}")
             return jsonify({'error': 'Internal server error'}), 500
     
+@app.route('/api/<collection_name>/<domain_name>/<username>/createdocument', methods=['PUT'])
+def upload_document(collection_name, domain_name, username):
+     files = request.files.getlist('files')
+     container_name = collection_name.lower().replace(' ', '-')
+     files_with_links = []
+     activities = []
+     container_client = blob_service_client.get_container_client(collection_name)
+     for file in files:
+        blob_client_direct = container_client.get_blob_client(f"{domain_name}/{file.filename}")
+        blob_version = blob_client_direct.get_blob_properties().version_id
+        main_part, fractional_part = blob_version[:-1].split('.')
+        fractional_part = fractional_part[:6] 
+        adjusted_timestamp_str = f"{main_part}.{fractional_part}Z"
+        timestamp_dt = datetime.strptime(adjusted_timestamp_str, '%Y-%m-%dT%H:%M:%S.%fZ')
+        timestamp_dt = utc.localize(timestamp_dt)
 
-@app.route('/api/dropcollection', methods=['DELETE'])
+        local_tz = timezone('Asia/Singapore')
+        local_timestamp_dt = timestamp_dt.astimezone(local_tz)
+    
+        date_str = local_timestamp_dt.date().isoformat()
+        time_str = local_timestamp_dt.strftime('%H:%M:%S')
+
+        print(date_str)
+        print(time_str)
+
+        print(f"this is blob version: {blob_version}")
+        sas_token = generate_sas_token(container_name, f'{domain_name}/{file.filename}')
+        blob_url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{container_name}/{f'{domain_name}/{file.filename}'}?{sas_token}"
+        files_with_links.append({
+            "course_name" : container_name,
+            "domain": domain_name,
+            "name": file.filename,
+            "url": blob_url,
+            "blob_name": f'{domain_name}/{file.filename}',
+            "version_id": blob_version,
+            "date_str": date_str,
+            "time_str": time_str,
+            "in_vector_store": 'yes',
+            "is_root_blob": 'yes',
+        
+        })
+        activities.append({
+            "uername": username,
+            "course_name": collection_name,
+            "domain": domain_name,
+            "file": file.filename,
+            "action": "Uploaded File",
+            "date_str": date_str,
+            "time_str": time_str
+        })
+        create_document_success = create_document(files_with_links)
+        if create_document_success:
+            add_activity_status = add_activity(activities)
+            if add_activity_status:
+               return jsonify({"message": "Documents created successfully!"}), 201
+            else:
+                return jsonify({'error': 'Failed to upload activity status'}), 500
+        else:
+            return jsonify({'error': 'Failed to create documents'}), 500
+    
+
+@app.route('/api/deletecourse', methods=['DELETE'])
 def delete_course():
     data = request.json
     collection_name = data.get('collectionName')
@@ -250,18 +260,24 @@ def delete_course():
     if not collection_name:
         return jsonify({"error": "Collection name is required"}), 400
     try:
-        delete_success_container = delete_blob_storage_container(collection_name)
-        if delete_success_container:
-            delete_all_course_docs = delete_all_course_documents(collection_name)
-            if(delete_all_course_docs):
-                return jsonify({"message": "Container deleted successfully!"}), 201
+        delete_index = delete_index_function(collection_name)
+        if delete_index:
+            delete_success_container = delete_blob_storage_container(collection_name)
+            if delete_success_container:
+                delete_all_course_docs = delete_all_course_documents(collection_name)
+                if(delete_all_course_docs):
+                    return jsonify({"message": "Container deleted successfully!"}), 201
+                else:
+                    return jsonify({"message: Failed to delete the documents"}), 500
             else:
-                return jsonify({"message: Failed to delete the documents"}), 500
-        else:
-            return jsonify({'error': 'Failed to delete contaier'}), 500
+                return jsonify({'error': 'Failed to delete contaier'}), 500
+        else: 
+            return jsonify({'error': 'Failed to delete index'}), 500
         
     except Exception as error:
         return jsonify({'error': 'Internal server error'}), 500
+    
+    
     
 @app.route('/api/deletedomain', methods=['DELETE'])
 def delete_domain():
@@ -270,8 +286,6 @@ def delete_domain():
     domain_name = data.get('domainName')
     username = data.get('username')
     activities = []
-
-
     try:
         domain_docs = get_documents(username, course_name, domain_name)
         for doc in domain_docs:
@@ -377,21 +391,6 @@ def DeleteEmbeddings(collection_name):
     else:
         return jsonify({"message": "Failed to delete embeddings"}), 500
     
-    
-@app.route('/api/dropIndex', methods=['DELETE'])
-def delete_index():
-    data = request.json
-    collection_name = data.get('collectionName')
-    collection_name = collection_name.lower().replace(' ', '-')
-
-
-    index_deletion_status = delete_index_function(collection_name)
-
-    if index_deletion_status:  
-        return jsonify({"message": "Index deleted successfully"}), 201
-    else:
-        return jsonify({"message": "Failed to delete index"}), 500
-   
     
 @app.route('/updatemovement', methods=['PUT'])
 def update_movement():

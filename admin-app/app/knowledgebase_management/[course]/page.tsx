@@ -12,13 +12,18 @@ import { PublicClientApplication} from "@azure/msal-browser";
 import NotFoundPage from '../../components/authentication/404';
 import ForbiddenPage from '../../components/authentication/403';
 
+interface Category{
+  'domain': string,
+  'usertype': string
+
+}
 const msalInstance = new PublicClientApplication(msalConfig);
 
 function DomainContent({params} : {params: {course: string}}) {
 
   const [showPopup, setShowPopup] = useState<boolean>(false);
   const [domainCreated, setDomainCreated] = useState<boolean>(true); 
-  const [domains, setDomains] = useState<string[]>([]);
+  const [domains, setDomains] = useState<Category[]>([]);
   const [domainDeleted, setDomainDeleted] = useState<boolean>(true); 
   const[domainName, setDomainName] = useState<string>('')
   const[showDeletionPopup, setShowDeletionPopup] = useState<boolean>(false);
@@ -77,7 +82,7 @@ function DomainContent({params} : {params: {course: string}}) {
         return response.json();
       }
     })
-    .then((domains: string[]) => {
+    .then((domains: Category[]) => {
       setDomains(domains);
     })
     .catch(error => {
@@ -105,8 +110,8 @@ function DomainContent({params} : {params: {course: string}}) {
            authorised ? (
              domains?.length > 0 ? (
           <div className="flex flex-wrap mt-5">
-            {domains?.map((domain: string, index: number) => (
-              <DomainCard key={index} courseName={collectionName} domainName={domain} onDomainDeleted={handlePressDelete}/>
+            {domains?.map((domain: Category, index: number) => (
+              <DomainCard key={index} courseName={collectionName} domainName={domain['domain']} onDomainDeleted={handlePressDelete} user_type={domain['usertype']}/>
             ))}
           </div>
 

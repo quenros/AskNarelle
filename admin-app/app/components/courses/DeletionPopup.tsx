@@ -16,7 +16,7 @@ const DeletionPopup: React.FC<DeletionPopupProps> = ({ onClose, onCourseDeleted,
 
   const handleDelete = () => {
     setIsLoading(true)
-    fetch('http://127.0.0.1:5000/api/dropcollection', {
+    fetch('http://127.0.0.1:5000/api/deletecourse', {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
@@ -25,13 +25,7 @@ const DeletionPopup: React.FC<DeletionPopupProps> = ({ onClose, onCourseDeleted,
     })
     .then(response => {
       if (response.status === 201) {
-        return  fetch('http://127.0.0.1:5000/api/dropIndex', {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ collectionName: courseName}),
-        });
+        console.log("Course deleted successfully")
       } else if(!response.ok) {
         console.error('Failed to delete index');
       }

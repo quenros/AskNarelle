@@ -18,13 +18,28 @@ export const msalInstance = new PublicClientApplication(msalConfig);
 const DomainPopup: React.FC<PopupProps> = ({ onClose, onDomainCreated, collectionName}) => {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string>('');
   const accounts = msalInstance.getAllAccounts();
   const username = accounts[0].username;
 
 
+ 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setInputValue(e.target.value);
+    const value = e.target.value;
+    
+    // Regular expression to allow only lowercase letters and numbers
+    const regex = /^[a-z0-9]*$/;
+
+    // If the input is valid, update the input value and clear the error message
+    if (regex.test(value)) {
+      setInputValue(value);
+      setErrorMessage('');
+    } else {
+      // Show error message for invalid input
+      setErrorMessage('Input can only contain lowercase letters and numbers.');
+    }
   };
+
 
   const handleSubmit = () => {
     setIsLoading(true)
@@ -38,7 +53,15 @@ const DomainPopup: React.FC<PopupProps> = ({ onClose, onDomainCreated, collectio
     .then(response => {
       if (response.ok) {
         console.log('Domain created successfully');
-      } else {
+        onClose();
+        onDomainCreated(); 
+      } 
+      else if(response.status === 400){
+        return response.json().then(data => {
+          setErrorMessage(data.message); // Use the message from the response
+        });
+      }
+      else {
         throw new Error('Failed to create domain');
       }
     })
@@ -47,8 +70,7 @@ const DomainPopup: React.FC<PopupProps> = ({ onClose, onDomainCreated, collectio
     })
     .finally(() => {
       setIsLoading(false);
-      onClose();
-      onDomainCreated(); // Close the popup regardless of success or failure
+     // Close the popup regardless of success or failure
     });
   };
   
@@ -85,7 +107,7 @@ const DomainPopup: React.FC<PopupProps> = ({ onClose, onDomainCreated, collectio
         {
           !isLoading && (
             <>
-            <label htmlFor="courseName" className="block mb-2 text-gray-800 font-semibold">Domain Name</label>
+            <label htmlFor="courseName" className="block mb-2 text-gray-800 font-semibold">Category Name</label>
             <input
               type="text"
               value={inputValue}
@@ -93,6 +115,9 @@ const DomainPopup: React.FC<PopupProps> = ({ onClose, onDomainCreated, collectio
               className="border border-gray-300 rounded-md px-4 py-2 mb-4 w-full"
               placeholder="Enter your input"
             />
+             {errorMessage !== ''  && (
+              <p className="text-red-500 text-sm mb-4 font-nunito">{errorMessage}</p>
+            )}
             <button
               onClick={handleSubmit}
               className="bg-[#2C3463] text-white font-bold py-2 px-4 rounded transition-transform duration-300 ease-in-out transform hover:scale-105 hover:bg-[#3C456C]"

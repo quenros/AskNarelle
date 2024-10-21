@@ -97,8 +97,8 @@ function ActivityLog(): JSX.Element {
                         type="text"
                         value={searchUsername}
                         onChange={handleUsernameChange}
-                        placeholder="Search by Username"
-                        className="border border-gray-300 rounded-lg py-2 pl-10 pr-4 mr-2 w-full font-nunito"
+                        placeholder="Username"
+                        className="border border-gray-300 rounded-lg py-2 pl-10 pr-4 mr-2 w-3/4 font-nunito"
                       />
                       <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
                         <CiSearch size={20} />
@@ -114,8 +114,8 @@ function ActivityLog(): JSX.Element {
                         type="text"
                         value={searchCourseName}
                         onChange={handleCourseNameChange}
-                        placeholder="Search by Course Name"
-                        className="border border-gray-300 rounded-lg py-2 pl-10 pr-4 mr-2 w-full font-nunito"
+                        placeholder="Course Name"
+                        className="border border-gray-300 rounded-lg py-2 pl-10 pr-4 mr-2 w-3/4 font-nunito"
                       />
                       <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
                         <CiSearch size={20} />
@@ -133,8 +133,8 @@ function ActivityLog(): JSX.Element {
                         type="text"
                         value={searchDomain}
                         onChange={handleDomainChange}
-                        placeholder="Search by Category"
-                        className="border border-gray-300 rounded-lg py-2 pl-10 pr-4 mr-2 w-full font-nunito"
+                        placeholder="Category"
+                        className="border border-gray-300 rounded-lg py-2 pl-10 pr-4 mr-2 w-3/4 font-nunito"
                       />
                       <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
                         <CiSearch size={20} />
@@ -150,8 +150,8 @@ function ActivityLog(): JSX.Element {
                         type="text"
                         value={searchQuery}
                         onChange={handleSearchChange}
-                        placeholder="Search for Files"
-                        className="border border-gray-300 rounded-lg py-2 pl-10 pr-4 mr-2 w-full font-nunito"
+                        placeholder="File Name"
+                        className="border border-gray-300 rounded-lg py-2 pl-10 pr-4 mr-2 w-3/4 font-nunito"
                       />
                       <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
                         <CiSearch size={20} />

@@ -22,8 +22,19 @@ const Popup: React.FC<PopupProps> = ({ onClose, onCollectionCreated}) => {
   const username = accounts[0].username;
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setInputValue(e.target.value);
-    setErrorMessage(''); // Clear the error message when the input changes
+    const value = e.target.value;
+    
+    // Regular expression to allow only lowercase letters and numbers
+    const regex = /^[a-z0-9]*$/;
+
+    // If the input is valid, update the input value and clear the error message
+    if (regex.test(value)) {
+      setInputValue(value);
+      setErrorMessage('');
+    } else {
+      // Show error message for invalid input
+      setErrorMessage('Input can only contain lowercase letters and numbers.');
+    }
   };
 
   // const handleSubmit = () => {

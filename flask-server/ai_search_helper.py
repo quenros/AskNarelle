@@ -31,196 +31,6 @@ embedding_vector = embeddings.embed_query(sample_text)
 
 embedding_dimension = len(embedding_vector)
 
-# def storeDocuments(containername, chunksize, overlap):
-      
-#     docs_to_add = []
-#     docs_to_update = []
-#     docs_to_update_id = []
-    
-#     docs_to_add_final= []
-#     docs_to_add_page_content = []
-#     docs_to_add_embeddings = []
-#     docs_to_add_filename = []
-
-#     docs_to_update_final = []
-#     docs_to_update_page_content = []
-#     docs_to_update_embeddings = []
-#     docs_to_update_filename = []
-  
-#     try:
-#         search_client = SearchClient(endpoint=os.environ.get('AZURE_COGNITIVE_SEARCH_ENDPOINT'), index_name=containername, credential=AzureKeyCredential(os.environ.get('AZURE_COGNITIVE_SEARCH_API_KEY')))
-
-#         loader = AzureBlobStorageContainerLoader(
-#                     conn_str=os.environ.get('AZURE_CONN_STRING'),
-#                     container= containername,
-#                     prefix='new/'
-#         )
-     
-#         text_splitter = CharacterTextSplitter(chunk_size=chunksize, chunk_overlap=overlap)
-  
-#         documents = loader.load()
-#         # print(embeddings.dimensions)
-#         # print(embedding_dimension)
-
-#         for doc in documents:
-#             path_to_check = doc.metadata['source']
-#             filename_to_check = Path(path_to_check).name
-#             search_results = search_client.search(filter=f"filename eq '{filename_to_check}'")
-#             first_result = next(search_results, None)
-#             if first_result is not None:
-#                     search_results = search_client.search(filter=f"filename eq '{filename_to_check}'")
-#                     print("update!")
-#                     for result in search_results:
-#                         print(result['filename'])
-#                         docs_to_update_id.append(result['id'])
-                            
-#                     split_docs_to_update = text_splitter.split_documents([doc])
-#                     for sdoc in split_docs_to_update:
-#                         docs_to_update.append(sdoc)                    
-#             else:
-#                 print("add!")
-#                 split_docs_to_add = text_splitter.split_documents([doc])
-#                 for adoc in split_docs_to_add:
-#                     docs_to_add.append(adoc)    
-            
-#         for doc in docs_to_update:
-#             path_to_update = doc.metadata['source']
-#             filename_to_update = Path(path_to_update).name
-#             docs_to_update_filename.append(filename_to_update)
-#             docs_to_update_page_content.append(doc.page_content)
-        
-#         for doc in docs_to_add:
-#             path_to_add = doc.metadata['source']
-#             filename_to_add = Path(path_to_add).name
-#             docs_to_add_filename.append(filename_to_add)
-#             docs_to_add_page_content.append(doc.page_content)
-#         docs_to_update_embeddings = embeddings.embed_documents(docs_to_update_page_content)
-#         docs_to_add_embeddings = embeddings.embed_documents(docs_to_add_page_content)
-
-#         if(len(docs_to_update_page_content) != 0):
-#             for i in range(len(docs_to_update_page_content)):
-#                 docs_to_update_final.append({
-#                     'id': docs_to_update_id[i],
-#                     'content': docs_to_update_page_content[i],
-#                     'content_vector': docs_to_update_embeddings[i],
-#                     'filename': docs_to_update_filename[i]
-#                 })
-
-#             search_client.merge_documents(docs_to_update_final)
-
-#         if(len(docs_to_add_page_content) != 0):
-#             for i in range(len(docs_to_add_page_content)):
-#                 docs_to_add_final.append({
-#                     'id': str(uuid.uuid4()),
-#                     'content': docs_to_add_page_content[i],
-#                     'content_vector': docs_to_add_embeddings[i],
-#                     'filename': docs_to_add_filename[i]
-#                 })
-#             search_client.upload_documents(docs_to_add_final)
-
-#         return "True"
-#     except Exception as e:
-#         print(f"An error occurred: {e}")
-#         return e
-
-    
-
-# def moveToVectorStoreFunction(containername, domainname, versionid, chunksize, overlap, filename):
-#     docs_to_add = []
-#     docs_to_update = []
-#     docs_to_update_id = []
-    
-#     docs_to_add_final= []
-#     docs_to_add_page_content = []
-#     docs_to_add_embeddings = []
-#     docs_to_add_filename = []
-
-#     docs_to_update_final = []
-#     docs_to_update_page_content = []
-#     docs_to_update_embeddings = []
-#     docs_to_update_filename = []
-
-#     try:   
-#         search_client = SearchClient(endpoint=os.environ.get('AZURE_COGNITIVE_SEARCH_ENDPOINT'), index_name=containername, credential=AzureKeyCredential(os.environ.get('AZURE_COGNITIVE_SEARCH_API_KEY')))
-
-#         text_splitter = CharacterTextSplitter(chunk_size=chunksize, chunk_overlap=overlap)
-   
-
-#         blob_client = blob_service_client.get_blob_client(container=containername, blob=f"{domainname}/{filename}", version_id=versionid)
-
-#         blob_content = blob_client.download_blob().readall()
-
-#         if(filename.endswith('.pdf')):
-#             page_content = read_pdf(blob_content)
-#         elif filename.endswith('.docx'):
-#             page_content = read_docx(blob_content)
-#         elif filename.endswith('.pptx'):
-#             page_content = read_pptx(blob_content)
-#         elif filename.endswith('.txt'):
-#             page_content = read_txt(blob_content)
-#         else:
-#             return jsonify({"error": "not a valid file"}), 500
-#         doc = Document(page_content= page_content, metadata={"source": filename})
-
-#         filename_to_check = doc.metadata["source"]
-#         search_results = search_client.search(filter=f"filename eq '{filename_to_check}'")
-#         first_result = next(search_results, None)
-#         if first_result is not None:
-#                 search_results = search_client.search(filter=f"filename eq '{filename_to_check}'")
-#                 print("update!")
-#                 for result in search_results:
-#                     print(result['filename'])
-#                     docs_to_update_id.append(result['id'])
-                        
-#                 split_docs_to_update = text_splitter.split_documents([doc])
-#                 for sdoc in split_docs_to_update:
-#                     docs_to_update.append(sdoc)                    
-#         else:
-#             print("add!")
-#             split_docs_to_add = text_splitter.split_documents([doc])
-#             for adoc in split_docs_to_add:
-#                 docs_to_add.append(adoc)    
-
-#         for doc in docs_to_update:
-#             path_to_update = doc.metadata['source']
-#             docs_to_update_filename.append(path_to_update)
-#             docs_to_update_page_content.append(doc.page_content)
-
-#         for doc in docs_to_add:
-#             path_to_add = doc.metadata['source']
-#             docs_to_add_filename.append(path_to_add)
-#             docs_to_add_page_content.append(doc.page_content)
-   
-#         docs_to_update_embeddings = embeddings.embed_documents(docs_to_update_page_content)
-#         docs_to_add_embeddings = embeddings.embed_documents(docs_to_add_page_content)
-    
-#         if(len(docs_to_update_page_content) != 0):
-#             for i in range(len(docs_to_update_page_content)):
-#                 docs_to_update_final.append({
-#                     'id': docs_to_update_id[i],
-#                     'content': docs_to_update_page_content[i],
-#                     'content_vector': docs_to_update_embeddings[i],
-#                     'filename': docs_to_update_filename[i]
-#                 })
-
-#             search_client.merge_documents(docs_to_update_final)
-
-#         if(len(docs_to_add_page_content) != 0):
-#             for i in range(len(docs_to_add_page_content)):
-#                 docs_to_add_final.append({
-#                     'id': str(uuid.uuid4()),
-#                     'content': docs_to_add_page_content[i],
-#                     'content_vector': docs_to_add_embeddings[i],
-#                     'filename': docs_to_add_filename[i]
-#                 })
-
-#             search_client.upload_documents(docs_to_add_final)
-#         return True
-
-#     except Exception as e:
-#         print(f"An error occurred: {e}")
-#         return False
-
 
 def storeDocuments(containername, chunksize, overlap):
     try:
@@ -243,9 +53,9 @@ def storeDocuments(containername, chunksize, overlap):
         docs_to_update_final = []
 
         for doc in documents:
+            split_docs = text_splitter.split_documents([doc])
             filename = Path(doc.metadata['source']).name
             search_results = list(search_client.search(filter=f"filename eq '{filename}'"))
-            split_docs = text_splitter.split_documents([doc])
 
             if search_results:
                 print("update!")
@@ -295,7 +105,8 @@ def moveToVectorStoreFunction(containername, domainname, versionid, chunksize, o
             
 
         text_splitter = CharacterTextSplitter(chunk_size=chunksize, chunk_overlap=overlap)
-        blob_client = blob_service_client.get_blob_client(container=containername, blob=f"{domainname}/{filename}", version_id=versionid)
+        blob_client = blob_service_client.get_blob_client(container=containername, 
+                                    blob=f"{domainname}/{filename}", version_id=versionid)
         blob_content = blob_client.download_blob().readall()
         # Determine the file type and read content
         file_readers = {
@@ -314,7 +125,6 @@ def moveToVectorStoreFunction(containername, domainname, versionid, chunksize, o
         filename_to_check = doc.metadata["source"]
 
         # Check if the document already exists
-        print("Hey")
         search_results = list(search_client.search(filter=f"filename eq '{filename_to_check}'"))
 
         docs_to_add_final = []
@@ -417,7 +227,7 @@ def  createIndexFucntion(collection_name):
         return False
     
 def delete_index_function(collection_name):
-    client = SearchIndexClient(os.environ.get('https://ai-service-v3.search.windows.net'), AzureKeyCredential(os.environ.get('AZURE_COGNITIVE_SEARCH_API_KEY')))
+    client = SearchIndexClient(os.environ.get('AZURE_COGNITIVE_SEARCH_ENDPOINT'), AzureKeyCredential(os.environ.get('AZURE_COGNITIVE_SEARCH_API_KEY')))
     try:
        client.delete_index(collection_name)
        return True
@@ -426,7 +236,8 @@ def delete_index_function(collection_name):
         return False
     
 def delete_embeddings_function(blobName, collection_name):
-    search_client = SearchClient(os.environ.get('AZURE_COGNITIVE_SEARCH_ENDPOINT'), collection_name, AzureKeyCredential(os.environ.get('AZURE_COGNITIVE_SEARCH_API_KEY')))
+    search_client = SearchClient(os.environ.get('AZURE_COGNITIVE_SEARCH_ENDPOINT'), 
+          collection_name, AzureKeyCredential(os.environ.get('AZURE_COGNITIVE_SEARCH_API_KEY')))
     try: 
         print(blobName)     
         search_result = search_client.search(filter=f"filename eq '{blobName}'")
