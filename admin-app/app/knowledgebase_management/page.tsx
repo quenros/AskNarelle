@@ -86,7 +86,7 @@ function ManageKnowledgeBase(): JSX.Element {
 
 
   useEffect(() => {
-      fetch(`http://127.0.0.1:5000/api/collections/${username}`)
+      fetch(`https://asknarelle-backend.azurewebsites.net/api/collections/${username}`)
       .then(response => {
         if (!response.ok) {
           throw new Error('Failed to fetch collections');

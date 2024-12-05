@@ -42,7 +42,7 @@ export default function Home() {
   useEffect(() => {
     console.log("username"+username)
     if (username) { 
-      fetch(`http://127.0.0.1:5000/chats/totalUsers/${username}`)
+      fetch(`https://asknarelle-backend.azurewebsites.net/chats/totalUsers/${username}`)
         .then(response => {
           if (!response.ok) {
             throw new Error('Failed to fetch total users');
@@ -56,7 +56,7 @@ export default function Home() {
           console.error('Error fetching total users:', error);
         });
 
-      fetch(`http://127.0.0.1:5000/chats/totalQueries/${username}`)
+      fetch(`https://asknarelle-backend.azurewebsites.net/chats/totalQueries/${username}`)
         .then(response => {
           if (!response.ok) {
             throw new Error('Failed to fetch total queries');

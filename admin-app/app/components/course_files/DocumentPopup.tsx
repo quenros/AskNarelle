@@ -85,14 +85,14 @@ const DocumentPopup: React.FC<PopupProps> = ({ onClose, onFileCreated, collectio
     // formData.append('chunkSize', chunkSize.toString())
     // formData.append('overlap', overlap.toString())
     setProgress('Uploading To File Storage')
-    fetch(`http://127.0.0.1:5000/api/${collectionName}/${domainName}/${username}/createblob`, {
+    fetch(`https://asknarelle-backend.azurewebsites.net/api/${collectionName}/${domainName}/${username}/createblob`, {
           method: 'PUT',
            body: formData
       })
     .then(blobResponse => {
         if (blobResponse.ok) {
           setProgress('Uploading To Vector Store')
-          return fetch('http://127.0.0.1:5000/vectorstore', {
+          return fetch('https://asknarelle-backend.azurewebsites.net/vectorstore', {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
@@ -106,7 +106,7 @@ const DocumentPopup: React.FC<PopupProps> = ({ onClose, onFileCreated, collectio
           .then(vectorResponse => {
             if (vectorResponse.ok) {
               setProgress('Uploading To database')
-              return fetch(`http://127.0.0.1:5000/api/${collectionName}/${domainName}/${username}/createdocument`, {
+              return fetch(`https://asknarelle-backend.azurewebsites.net/api/${collectionName}/${domainName}/${username}/createdocument`, {
                 method: 'PUT',
                 body: formData
               })

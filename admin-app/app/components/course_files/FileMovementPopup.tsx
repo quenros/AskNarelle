@@ -26,7 +26,7 @@ const FileMovementPopup: React.FC<FileMovementPopupProps> = ({fileName, collecti
 
   const handleFileMovement = () => {
     setIsLoading(true);
-    fetch(`http://127.0.0.1:5000/movetovectorstore`, {
+    fetch(`https://asknarelle-backend.azurewebsites.net/movetovectorstore`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -45,7 +45,7 @@ const FileMovementPopup: React.FC<FileMovementPopupProps> = ({fileName, collecti
     })
     .then(response => {
       if (response.status === 201) {
-        return fetch(`http://127.0.0.1:5000/updatemovement`, {
+        return fetch(`https://asknarelle-backend.azurewebsites.net/updatemovement`, {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',

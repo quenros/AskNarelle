@@ -52,7 +52,7 @@ function ActivityLog(): JSX.Element {
   };
 
   useEffect(() => {
-    fetch(`http://127.0.0.1:5000/activities/${username}/viewactivities`)
+    fetch(`https://asknarelle-backend.azurewebsites.net/activities/${username}/viewactivities`)
       .then(response => {
         if (response.status === 403) {
           setAuthorised(false);
@@ -82,11 +82,11 @@ function ActivityLog(): JSX.Element {
   );
 
   return (
-    <main className="flex flex-col h-screen mt-[8vh] lg:mt-[0vh] p-10 sm:p-24 justify-center">
+    <main className="flex flex-col h-screen lg:mt-[0vh] p-10 sm:p-24">
       {authorised ? (
         activities.length > 0 ? (
           <>
-            <div className='flex items-center justify-between mt-5 sm:mt-0 w-full'>
+            <div className='flex justify-between mt-5 sm:mt-0 w-full'>
               <div className='flex flex-col w-1/3'>
                 <div className='flex justify-between'>
                   {/* Search Box for Username */}

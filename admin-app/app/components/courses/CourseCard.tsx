@@ -22,7 +22,7 @@ const CourseCard: React.FC<CourseProps> = ({courseName, userType, onCourseDelete
   const[totalFiles, setTotalFiles] = useState<number>(0); 
 
   useEffect(() => {
-    fetch(`http://127.0.0.1:5000/api/${courseName}/totalFiles`)
+    fetch(`https://asknarelle-backend.azurewebsites.net/api/${courseName}/totalFiles`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Failed to fetch collections');

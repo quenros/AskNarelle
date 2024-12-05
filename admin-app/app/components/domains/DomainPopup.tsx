@@ -43,7 +43,7 @@ const DomainPopup: React.FC<PopupProps> = ({ onClose, onDomainCreated, collectio
 
   const handleSubmit = () => {
     setIsLoading(true)
-    fetch('http://127.0.0.1:5000/api/createdomain', {
+    fetch('https://asknarelle-backend.azurewebsites.net/api/createdomain', {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',

@@ -17,7 +17,7 @@ const ManageAccessPopup: React.FC<PopupProps> = ({onClose, courseName}) => {
     const [userDeleted, setUserDeleted] = useState<boolean>(false);
 
     useEffect(() => {
-        fetch(`http://127.0.0.1:5000/manageaccess/${courseName}`)
+        fetch(`https://asknarelle-backend.azurewebsites.net/manageaccess/${courseName}`)
         .then(response => {
           if (!response.ok) {
             throw new Error('Failed to fetch users');
@@ -35,7 +35,7 @@ const ManageAccessPopup: React.FC<PopupProps> = ({onClose, courseName}) => {
 
     const handleDeleteUser = (user: string) => {
       setIsLoading(true)
-      fetch('http://127.0.0.1:5000/manageaccess/deleteUser', {
+      fetch('https://asknarelle-backend.azurewebsites.net/manageaccess/deleteUser', {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',

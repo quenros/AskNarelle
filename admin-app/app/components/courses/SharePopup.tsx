@@ -32,7 +32,7 @@ const SharePopup: React.FC<PopupProps> = ({ onClose, onCourseShared, courseName}
   const handleInvite = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch('http://127.0.0.1:5000/invite', {
+      const response = await fetch('https://asknarelle-backend.azurewebsites.net/invite', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

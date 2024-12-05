@@ -31,7 +31,7 @@ const ChartTwo: React.FC = () => {
   const[categories,setCategories] = useState<string[]>([])
 
   useEffect(() => {
-    fetch(`http://127.0.0.1:5000/chats/queriesByCourse/${username}`)
+    fetch(`https://asknarelle-backend.azurewebsites.net/chats/queriesByCourse/${username}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Failed to fetch total users');

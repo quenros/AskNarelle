@@ -22,7 +22,7 @@ const FileDeletionPopup: React.FC<FileDeletionPopupProps> = ({fileName, collecti
 
   const handleDelete = () => {
     setIsLoading(true);
-    fetch(`http://127.0.0.1:5000/api/${collectionName}/deleteembeddings`, {
+    fetch(`https://asknarelle-backend.azurewebsites.net/api/${collectionName}/deleteembeddings`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
@@ -36,7 +36,7 @@ const FileDeletionPopup: React.FC<FileDeletionPopupProps> = ({fileName, collecti
     })
     .then(response => {
       if (response.status === 201) {
-        return fetch(`http://127.0.0.1:5000/api/${collectionName}/${domainName}/deletedocument`, {
+        return fetch(`https://asknarelle-backend.azurewebsites.net/api/${collectionName}/${domainName}/deletedocument`, {
             method: 'DELETE',
             headers: {
               'Content-Type': 'application/json',

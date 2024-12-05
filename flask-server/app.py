@@ -241,16 +241,16 @@ def upload_document(collection_name, domain_name, username):
             "date_str": date_str,
             "time_str": time_str
         })
-        create_document_success = create_document(files_with_links)
-        if create_document_success:
-            add_activity_status = add_activity(activities)
-            if add_activity_status:
-               return jsonify({"message": "Documents created successfully!"}), 201
-            else:
-                return jsonify({'error': 'Failed to upload activity status'}), 500
+     create_document_success = create_document(files_with_links)
+     if create_document_success:
+        add_activity_status = add_activity(activities)
+        if add_activity_status:
+            return jsonify({"message": "Documents created successfully!"}), 201
         else:
-            return jsonify({'error': 'Failed to create documents'}), 500
-    
+            return jsonify({'error': 'Failed to upload activity status'}), 500
+     else:
+        return jsonify({'error': 'Failed to create documents'}), 500
+        
 
 @app.route('/api/deletecourse', methods=['DELETE'])
 def delete_course():
@@ -575,7 +575,7 @@ def invite_user():
             invite_url = graph_url + 'invitations'
             invite_body = {
                 "invitedUserEmailAddress": email,
-                "inviteRedirectUrl": "http://localhost:3000",
+                "inviteRedirectUrl": "https://asknarelle-frontend.azurewebsites.net",
                 "sendInvitationMessage": True
             }
             

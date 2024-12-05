@@ -37,7 +37,7 @@ const ChartOne: React.FC = () => {
 const[categories, setCategories] = useState<string[]>([])
 
   useEffect(() => {
-    fetch(`http://127.0.0.1:5000/chats/queriesByMonth/${username}`)
+    fetch(`https://asknarelle-backend.azurewebsites.net/chats/queriesByMonth/${username}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Failed to fetch total users');
@@ -157,7 +157,7 @@ const[categories, setCategories] = useState<string[]>([])
         },
       },
       min: 0,
-      max: 100,
+      max: 10,
     },
   };
 

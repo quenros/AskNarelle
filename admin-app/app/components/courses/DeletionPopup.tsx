@@ -16,7 +16,7 @@ const DeletionPopup: React.FC<DeletionPopupProps> = ({ onClose, onCourseDeleted,
 
   const handleDelete = () => {
     setIsLoading(true)
-    fetch('http://127.0.0.1:5000/api/deletecourse', {
+    fetch('https://asknarelle-backend.azurewebsites.net/api/deletecourse', {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',

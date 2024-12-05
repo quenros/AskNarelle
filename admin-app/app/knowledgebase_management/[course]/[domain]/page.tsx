@@ -129,7 +129,7 @@ function Fileslist({params} : {params: {domain: string, course: string}}): JSX.E
   
     useEffect(() => {
       // console.log("Document");
-        fetch(`http://127.0.0.1:5000/api/collections/${username}/${collectionName}/${domainName}`)
+        fetch(`https://asknarelle-backend.azurewebsites.net/api/collections/${username}/${collectionName}/${domainName}`)
         .then(response => {
           if (response.status === 403) {
             setAuthorised(false)

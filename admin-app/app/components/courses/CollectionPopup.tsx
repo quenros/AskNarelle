@@ -85,7 +85,7 @@ const Popup: React.FC<PopupProps> = ({ onClose, onCollectionCreated}) => {
       setContainerExsists(false);
   
       // Step 1: Create the index
-      const indexResponse = await fetch('http://127.0.0.1:5000/createindex', {
+      const indexResponse = await fetch('https://asknarelle-backend.azurewebsites.net/createindex', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -99,7 +99,7 @@ const Popup: React.FC<PopupProps> = ({ onClose, onCollectionCreated}) => {
       }
   
       // Step 2: Create the collection
-      const collectionResponse = await fetch('http://127.0.0.1:5000/api/createcollection', {
+      const collectionResponse = await fetch('https://asknarelle-backend.azurewebsites.net/api/createcollection', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
