@@ -2,7 +2,7 @@ langchain
 openai
 python-dotenv
 azure-storage-blob
-unstructured[all-docs]
+unstructured
 azure-identity
 azure-search-documents
 langchain-community
