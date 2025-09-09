@@ -1,11 +1,11 @@
 // const NEXTJS_APP_CLIENT_ID='ENTER_CLIENT_ID_HERE'
 // const NEXTJS_APP_AUTHORITY='https://login.microsoftonline.com/ENTER_TENANT_ID_HERE'
 
-const NEXTJS_APP_CLIENT_ID= '82975238-6638-446b-8096-0cf0619842ea'
+const NEXTJS_APP_CLIENT_ID= '4b2ecccd-35e0-466f-bf23-31a8d87931e7'
 // '509f0927-90b2-4261-b44d-1fb9b18c0ae9'
 
 
-const NEXTJS_APP_AUTHORITY='https://login.microsoftonline.com/d18181a6-ad98-4e2e-a33a-2be9ed593106'
+const NEXTJS_APP_AUTHORITY='https://login.microsoftonline.com/d6bee465-7028-48e4-b4f5-ed56a9a83dbd'
 
 // Config object to be passed to Msal on creation
 export const msalConfig = {
