@@ -1,28 +1,73 @@
-// FileTable.tsx
+import React, { useMemo, useState } from "react";
+import type { ColumnsType } from "antd/es/table";
+import {
+  Table,
+  Tag,
+  Space,
+  Button,
+  Tooltip,
+  DatePicker,
+  Select,
+  Typography,
+  Popconfirm,
+  Flex,
+} from "antd";
+import {
+  CloudUploadOutlined,
+  DeleteOutlined,
+  DeleteTwoTone,
+  LinkOutlined,
+} from "@ant-design/icons";
+import dayjs, { Dayjs } from "dayjs";
 
-import React, {useState} from 'react';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
-import FileCard from './FileCard';
+const { RangePicker } = DatePicker;
+const { Text } = Typography;
 
-interface Document{
-    _id: string;
-    name: string;
-    url: string;
-    version_id: string;
-    date_str: string;
-    time_str: string;
-    in_vector_store: string;
-    is_root_blob: string
+interface Document {
+  _id: string;
+  name: string;
+  url: string;
+  version_id: string;
+  date_str: string; // "YYYY-MM-DD"
+  time_str: string; // "HH:mm:ss"
+  in_vector_store: string; // "yes" or "no"
+  is_root_blob: string;    // "yes" or "no"
 }
 
 interface FileTableProps {
   files: Document[];
   collectionName: string;
-  onFileDeleted: (id: string, collection: string, file: string, version_id: string, is_root_blob: string) => void,
-  onFileMoved: (id: string, collection: string, file: string, version_id: string) => void,
-  onBlobDeleted: (id: string, collection: string, file: string, version_id: string, is_root_blob: string) => void
+  onFileDeleted: (
+    id: string,
+    collection: string,
+    file: string,
+    version_id: string,
+    is_root_blob: string
+  ) => void;
+  onFileMoved: (
+    id: string,
+    collection: string,
+    file: string,
+    version_id: string
+  ) => void;
+  onBlobDeleted: (
+    id: string,
+    collection: string,
+    file: string,
+    version_id: string,
+    is_root_blob: string
+  ) => void;
 }
+
+const DOC_EXTS = [".pdf", ".docx", ".pptx", ".txt"];
+const VIDEO_EXTS = [".mp4", ".mov", ".mkv", ".webm", ".avi"];
+
+const getExt = (name: string) => {
+  const i = name.lastIndexOf(".");
+  return i >= 0 ? name.slice(i).toLowerCase() : "";
+};
+const isDoc = (name: string) => DOC_EXTS.includes(getExt(name));
+const isVideo = (name: string) => VIDEO_EXTS.includes(getExt(name));
 
 const FilesTable: React.FC<FileTableProps> = ({
   files,
@@ -31,181 +76,210 @@ const FilesTable: React.FC<FileTableProps> = ({
   onFileMoved,
   onBlobDeleted,
 }) => {
-  const [inVectorStoreFilter, setInVectorStoreFilter] = useState<string | null>(
-    null
-  );
-  const [isRootBlobFilter, setIsRootBlobFilter] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState<Date | null>(null);
-  const [endDate, setEndDate] = useState<Date | null>(null);
+  // toolbar filters
+  const [vecFilter, setVecFilter] = useState<"yes" | "no" | "">("");
+  const [rootFilter, setRootFilter] = useState<"yes" | "no" | "">("");
+  const [range, setRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
 
-  const handleDateConversion = (dateStr: string) => {
-    return new Date(dateStr);  
-  };
+  const filtered = useMemo(() => {
+    return (files || []).filter((d) => {
+      const vecOk = !vecFilter || d.in_vector_store === vecFilter;
+      const rootOk = !rootFilter || d.is_root_blob === rootFilter;
 
-  const filteredFiles = files.filter((document) => {
-    const documentDate = handleDateConversion(document.date_str);
+      if (!range || (!range[0] && !range[1])) return vecOk && rootOk;
 
-    const isWithinDateRange = !startDate || !endDate || 
-      (documentDate >= startDate && documentDate <= endDate);
+      const docDay = dayjs(d.date_str, "YYYY-MM-DD");
+      const startOk = !range[0] || docDay.isSame(range[0], "day") || docDay.isAfter(range[0], "day");
+      const endOk = !range[1] || docDay.isSame(range[1], "day") || docDay.isBefore(range[1], "day");
+      return vecOk && rootOk && startOk && endOk;
+    });
+  }, [files, vecFilter, rootFilter, range]);
 
-    return (
-      (inVectorStoreFilter === null ||
-        document.in_vector_store === inVectorStoreFilter) &&
-      (isRootBlobFilter === null || document.is_root_blob === isRootBlobFilter) &&
-      isWithinDateRange
-    );
-  });
+  const columns: ColumnsType<Document> = [
+    {
+      title: "File Name",
+      dataIndex: "name",
+      key: "name",
+      ellipsis: true,
+      sorter: (a, b) => a.name.localeCompare(b.name),
+      render: (_, record) => (
+        <Space size="small" wrap>
+          <Tooltip title="Open/download">
+            <a href={record.url} download={record.name} target="_blank" rel="noreferrer">
+              <LinkOutlined /> {record.name}
+            </a>
+          </Tooltip>
+          {isDoc(record.name) && <Tag color="cyan">Document</Tag>}
+          {isVideo(record.name) && <Tag color="purple">Video</Tag>}
+        </Space>
+      ),
+    },
+    {
+      title: "Vectorized",
+      dataIndex: "in_vector_store",
+      key: "vector",
+      width: 140,
+      filters: [
+        { text: "Yes", value: "yes" },
+        { text: "No", value: "no" },
+      ],
+      onFilter: (v, rec) => rec.in_vector_store === v,
+      render: (v: string) =>
+        v === "yes" ? <Tag color="green">Searchable</Tag> : <Tag>Stored only</Tag>,
+    },
+    {
+      title: "Root File",
+      dataIndex: "is_root_blob",
+      key: "root",
+      width: 120,
+      filters: [
+        { text: "Yes", value: "yes" },
+        { text: "No", value: "no" },
+      ],
+      onFilter: (v, rec) => rec.is_root_blob === v,
+      render: (v: string) => (v === "yes" ? <Tag color="blue">Root</Tag> : <Tag>Derived</Tag>),
+    },
+    {
+      title: "Date",
+      dataIndex: "date_str",
+      key: "date",
+      width: 140,
+      sorter: (a, b) =>
+        dayjs(a.date_str, "YYYY-MM-DD").valueOf() - dayjs(b.date_str, "YYYY-MM-DD").valueOf(),
+      render: (v: string) => <Text>{v}</Text>,
+    },
+    {
+      title: "Time",
+      dataIndex: "time_str",
+      key: "time",
+      width: 120,
+      sorter: (a, b) => a.time_str.localeCompare(b.time_str),
+      render: (v: string) => <Text type="secondary">{v}</Text>,
+    },
+    {
+      title: "Actions",
+      key: "actions",
+      width: 340,
+      render: (_, d) => {
+        const canDelete = d.in_vector_store === "yes" || d.is_root_blob === "yes";
+        const canDeleteFromStorage = d.in_vector_store === "no" && d.is_root_blob === "no";
+        const canMove = d.in_vector_store === "no"; // your original logic shows move in both root/non-root when not vectorized
 
-  return (
-    <div className="overflow-scroll mt-5 min-h-full">
-      <div className="flex top-0 sticky z-20 justify-center bg-gray-100">
-        <div className="flex space-x-4 al">
-        <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                In Vector Store?
-              </label>
-              <select
-                className="block w-[50] p-2 text-base border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-                value={inVectorStoreFilter || ''}
-                onChange={(e) =>
-                  setInVectorStoreFilter(
-                    e.target.value === '' ? null : e.target.value
-                  )
+        return (
+          <Space size="small" wrap>
+            {canDelete && (
+              <Popconfirm
+                title="Delete record"
+                description="This removes the record (blob if it's root)."
+                okText="Delete"
+                okButtonProps={{ danger: true }}
+                onConfirm={() =>
+                  onFileDeleted(d._id, collectionName, d.name, d.version_id, d.is_root_blob)
                 }
               >
-                <option value="">All</option>
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-              </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Is Root File?
-            </label>
-            <select
-              className="block w-[50] p-2 text-base border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
-              value={isRootBlobFilter || ''}
-              onChange={(e) =>
-                setIsRootBlobFilter(
-                  e.target.value === '' ? null : e.target.value
-                )
-              }
-            >
-              <option value="">All</option>
-              <option value="yes">Yes</option>
-              <option value="no">No</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Start Date</label>
-            <DatePicker
-              selected={startDate}
-              onChange={(date) => setStartDate(date)}
-              dateFormat="yyyy-MM-dd"
-              className="mt-1 p-2 border border-gray-300 rounded-md"
-              placeholderText="Select start date"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">End Date</label>
-            <DatePicker
-              selected={endDate}
-              onChange={(date) => setEndDate(date)}
-              dateFormat="yyyy-MM-dd"
-              className="mt-1 p-2 border border-gray-300 rounded-md"
-              placeholderText="Select end date"
-            />
-          </div>
-       
-        </div>
-      </div>
-      <table className="min-w-full divide-y divide-gray-200 rounded-lg mb-5 mt-5">
-       <thead className="bg-[#2C3463] top-16 sticky z-10">
-          <tr>
-            <th className="px-6 py-3 text-left text-sm font-medium text-white tracking-wider font-nunito">
-              File Name
-            </th>
-            <th className="px-6 py-3 text-left text-sm font-medium text-white tracking-wider font-nunito">
-              In Vector Store ?
-            </th>
-            <th className="px-6 py-3 text-left text-sm font-medium text-white tracking-wider font-nunito">
-              Is Root File ?
-            </th>
-            <th className="px-6 py-3 text-left text-sm font-medium text-white tracking-wider font-nunito">
-              Date
-            </th>
-            <th className="px-6 py-3 text-left text-sm font-medium text-white tracking-wider font-nunito">
-              Time
-            </th>
-            <th className="px-6 py-3 text-left text-sm font-medium text-white tracking-wider font-nunito">
-              Actions 
-            </th>
-          </tr>
-        </thead>
-        <tbody className="bg-white divide-y divide-gray-200">
-          {filteredFiles.map((document: Document, index: number) => (
-            <tr key={index}>
-              <td className="px-6 py-4 whitespace-nowrap">
-              <a href={document.url} download={document.name} className="text-blue-600 text-center underline font-nunito text-sm">
-              {document.name}
-               </a>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm text-[#7C8397] font-medium font-nunito">{document.in_vector_store.toString()}</div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm text-[#7C8397] font-medium font-nunito">{document.is_root_blob.toString()}</div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm text-[#7C8397] font-medium font-nunito">{document.date_str}</div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm text-[#7C8397] font-medium font-nunito">{document.time_str}</div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium font-nunito">
-              { (document.in_vector_store === "yes" || document.is_root_blob === "yes") && (
-                <button
-                  className="text-red-500 mr-5 p-2 transition duration-300 transform hover:scale-105 rounded-xl bg-red-500 bg-opacity-20"
-                  onClick={() => onFileDeleted(document._id, collectionName, document.name, document.version_id, document.is_root_blob)}
-                >
+                <Button danger icon={<DeleteOutlined />}>
                   Delete
-                </button> )}
-                { (document.in_vector_store === "no" && document.is_root_blob === "no") && (
-                    <>
-                     <button
-                     className="text-orange-500 mr-5 p-2 transition duration-300 transform hover:scale-105 rounded-xl bg-orange-500 bg-opacity-20"
-                     onClick={() => onBlobDeleted(document._id, collectionName, document.name, document.version_id, document.is_root_blob)}
-                   >
-                     Delete From File Storage
-                   </button>
-                <button
-                  className="text-green-500 mr-5 border border-solid p-2 transition duration-300 transform hover:scale-105 rounded-xl bg-green-500 bg-opacity-20"
-                  onClick={() => onFileMoved(document._id, collectionName, document.name, document.version_id)}
+                </Button>
+              </Popconfirm>
+            )}
+
+            {canDeleteFromStorage && (
+              <Popconfirm
+                title="Delete from storage"
+                description="This deletes the blob from file storage."
+                okText="Delete"
+                okButtonProps={{ danger: true }}
+                onConfirm={() =>
+                  onBlobDeleted(d._id, collectionName, d.name, d.version_id, d.is_root_blob)
+                }
+              >
+                <Button danger type="dashed" icon={<DeleteTwoTone twoToneColor="#ff4d4f" />}>
+                  Delete From File Storage
+                </Button>
+              </Popconfirm>
+            )}
+
+            {canMove && (
+              <Tooltip title="Add this file’s content to your vector store">
+                <Button
+                  type="primary"
+                  icon={<CloudUploadOutlined />}
+                  onClick={() => onFileMoved(d._id, collectionName, d.name, d.version_id)}
                 >
                   Move to vector store
-                </button> 
-                </>)}
-                { (document.in_vector_store === "no" && document.is_root_blob === "yes") && (
-                    <>
-            {/* <button
-            className="text-red-500 mr-5 p-2 transition duration-300 transform hover:scale-105 rounded-xl bg-red-500 bg-opacity-20"
-            onClick={() => onFileDeleted(document._id, collectionName, document.name, document.version_id, document.is_root_blob)}
-          >
-            Delete
-          </button>  */}
-                     <button
-                     className="text-green-500 mr-5 p-2 transition duration-300 transform hover:scale-105 rounded-xl bg-green-500 bg-opacity-20"
-                     onClick={() => onFileMoved(document._id, collectionName, document.name, document.version_id)}
-                   >
-                     Move to vector store
-                   </button>
-                   </> )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                </Button>
+              </Tooltip>
+            )}
+          </Space>
+        );
+      },
+    },
+  ];
+
+  return (
+    <div>
+      {/* Filter toolbar */}
+      <Flex gap={12} align="center" wrap style={{ marginBottom: 12 }}>
+        <Space size="small" align="center">
+          <Text strong>Vectorized</Text>
+          <Select
+            size="middle"
+            style={{ width: 140 }}
+            value={vecFilter}
+            onChange={(v) => setVecFilter(v)}
+            options={[
+              { label: "All", value: "" },
+              { label: "Yes", value: "yes" },
+              { label: "No", value: "no" },
+            ]}
+          />
+        </Space>
+
+        <Space size="small" align="center">
+          <Text strong>Root</Text>
+          <Select
+            size="middle"
+            style={{ width: 120 }}
+            value={rootFilter}
+            onChange={(v) => setRootFilter(v)}
+            options={[
+              { label: "All", value: "" },
+              { label: "Yes", value: "yes" },
+              { label: "No", value: "no" },
+            ]}
+          />
+        </Space>
+
+        <Space size="small" align="center">
+          <Text strong>Date</Text>
+          <RangePicker
+            value={range as any}
+            onChange={(vals) => setRange(vals as any)}
+            allowEmpty={[true, true]}
+            style={{ width: 280 }}
+          />
+          {(vecFilter || rootFilter || (range && (range[0] || range[1]))) && (
+            <Button onClick={() => { setVecFilter(""); setRootFilter(""); setRange(null); }}>
+              Clear filters
+            </Button>
+          )}
+        </Space>
+
+        <Text type="secondary" style={{ marginLeft: "auto" }}>
+          Showing {filtered.length} of {files.length}
+        </Text>
+      </Flex>
+
+      <Table<Document>
+        rowKey="_id"
+        columns={columns}
+        dataSource={filtered}
+        size="middle"
+        bordered
+        sticky
+        pagination={{ pageSize: 10, showSizeChanger: true }}
+        scroll={{ x: 1000 }}
+      />
     </div>
   );
 };

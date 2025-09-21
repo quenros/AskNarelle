@@ -1,117 +1,160 @@
-import React, { useEffect, useState } from 'react'
-import { IoIosCloseCircleOutline } from "react-icons/io";
-import { Oval } from 'react-loader-spinner';
-import { RiDeleteBin6Line } from "react-icons/ri";
-import { CgProfile } from "react-icons/cg";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  Modal,
+  List,
+  Avatar,
+  Typography,
+  Button,
+  Popconfirm,
+  Spin,
+  Alert,
+  Input,
+  Space,
+  Tag,
+  message,
+  Empty,
+} from "antd";
+import { UserOutlined, DeleteOutlined } from "@ant-design/icons";
 
 interface PopupProps {
-    onClose: () => void;
-    courseName: string;
-  }
-
-const ManageAccessPopup: React.FC<PopupProps> = ({onClose, courseName}) => {
-
-    const[users, setUsers] = useState<string[]>([]);
-    const [isLoading, setIsLoading] = useState<boolean>(false);
-    const [errorMessage, setErrorMessage] = useState<string>('');
-    const [userDeleted, setUserDeleted] = useState<boolean>(false);
-
-    useEffect(() => {
-        fetch(`https://asknarelle-backend.azurewebsites.net/manageaccess/${courseName}`)
-        .then(response => {
-          if (!response.ok) {
-            throw new Error('Failed to fetch users');
-          }
-          return response.json();
-        })
-        .then((users: string[]) => {
-          setUsers(users)
-        })
-        .catch(error => {
-          console.error('Error fetching users:', error);
-          setErrorMessage('Error fetching user.')
-        });
-    }, [courseName, userDeleted]); 
-
-    const handleDeleteUser = (user: string) => {
-      setIsLoading(true)
-      fetch('https://asknarelle-backend.azurewebsites.net/manageaccess/deleteUser', {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ collectionName: courseName, username: user }),
-      })
-      .then(response => {
-        console.log(response);
-        setUserDeleted(!userDeleted);
-        
-      })
-      .catch(error => {
-        console.error('Error deleting course:', error);
-      })
-      .finally(() => {
-        setIsLoading(false);
-    });
-  }
-
-  return (
-    <div className="fixed inset-0 flex items-center justify-center bg-gray-800 bg-opacity-50 z-50">
-      <div className="bg-white p-8 rounded-lg shadow-md relative sm:w-2/6 w-5/6">
-        <div className='text-lg font-semibold font-nunito mb-5'>People with access</div>
-        {!isLoading && (
-          <button
-            onClick={onClose}
-            className="absolute top-0 right-0 p-2"
-          >
-            <IoIosCloseCircleOutline color='#FF0E0E' size={30}/>
-          </button>
-        )}
-        {isLoading && (
-          <>
-            <div className="flex justify-center mb-4">
-              <Oval
-                height={40}
-                width={40}
-                color="#2c4787"
-                visible={true}
-                ariaLabel='oval-loading'
-                secondaryColor="#2c4787"
-                strokeWidth={2}
-                strokeWidthSecondary={2}
-              />
-            </div>
-            <p className="text-[#1a2d58] text-center mb-4 font-semibold">Sending</p>
-          </>
-        )}
-        {!isLoading && (
-          <>
-          {users.length > 0 ? (
-              <div className="space-y-3">
-                  {users.map((user: string, index) => (
-                      <div key={index} className="flex justify-between items-center bg-gray-100 p-2 rounded-lg shadow-sm hover:bg-gray-200 mx-5">
-                        <div className='flex'>
-                        <CgProfile size={24} color='#2C3463'/>
-                        <div className="text-gray-800 font-medium px-5 font-nunito">{user}</div>
-                        </div>
-                          <button onClick={() => handleDeleteUser(user)} className="text-red-500 hover:text-red-700 transition px-5">
-                              <RiDeleteBin6Line size={24} />
-                          </button>
-                      </div>
-                  ))}
-              </div>
-          ) : (
-              <p className="text-gray-600 text-center">No users found.</p>
-          )}
-
-          {errorMessage && (
-              <p className="text-red-500 text-sm mt-4 font-nunito">{errorMessage}</p>
-          )}
-      </>
-        )}
-      </div>
-    </div>
-  )
+  onClose: () => void;
+  courseName: string;
 }
 
-export default ManageAccessPopup
+const ManageAccessPopup: React.FC<PopupProps> = ({ onClose, courseName }) => {
+  const [open] = useState(true);
+  const [users, setUsers] = useState<string[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [errorMessage, setErrorMessage] = useState<string>("");
+  const [search, setSearch] = useState<string>("");
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true);
+        const resp = await fetch(`http://localhost:5000/manageaccess/${courseName}`);
+        if (!resp.ok) throw new Error("Failed to fetch users");
+        const data: string[] = await resp.json();
+        setUsers(data || []);
+        setErrorMessage("");
+      } catch (e: any) {
+        setErrorMessage(e?.message ?? "Error fetching users");
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, [courseName]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter((u) => u.toLowerCase().includes(q));
+  }, [users, search]);
+
+  const handleDeleteUser = async (user: string) => {
+    try {
+      setDeleting(user);
+      const resp = await fetch("http://localhost:5000/manageaccess/deleteUser", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collectionName: courseName, username: user }),
+      });
+
+      if (!resp.ok && resp.status !== 201) {
+        const errText = `${resp.status} ${resp.statusText}`;
+        throw new Error(errText || "Failed to remove user");
+      }
+
+      setUsers((prev) => prev.filter((u) => u !== user));
+      message.success(`Removed access for ${user}`);
+    } catch (e: any) {
+      message.error(e?.message ?? "Error removing user");
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      title={
+        <Space align="center">
+          <Typography.Text strong>People with access</Typography.Text>
+          <Tag color="blue">{courseName}</Tag>
+        </Space>
+      }
+      onCancel={loading || deleting ? undefined : onClose}
+      maskClosable={!(loading || !!deleting)}
+      closable={!(loading || !!deleting)}
+      destroyOnClose
+      width={560}
+      footer={[
+        <Button key="close" onClick={onClose} disabled={loading || !!deleting}>
+          Close
+        </Button>,
+      ]}
+    >
+      <Space direction="vertical" style={{ width: "100%" }} size="middle">
+        <Input
+          placeholder="Search users (email)"
+          allowClear
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          disabled={loading}
+        />
+
+        {errorMessage && (
+          <Alert type="error" showIcon message="Error" description={errorMessage} />
+        )}
+
+        <List
+          loading={loading}
+          dataSource={filtered}
+          locale={{
+            emptyText: loading ? (
+              <div style={{ textAlign: "center", padding: 24 }}>
+                <Spin />
+              </div>
+            ) : (
+              <Empty description="No users found" />
+            ),
+          }}
+          renderItem={(user) => (
+            <List.Item
+              actions={[
+                <Popconfirm
+                  key="remove"
+                  title="Remove access?"
+                  description={`This will revoke ${user}'s access to ${courseName}.`}
+                  okText="Remove"
+                  okButtonProps={{ danger: true, loading: deleting === user }}
+                  onConfirm={() => handleDeleteUser(user)}
+                  disabled={!!deleting}
+                >
+                  <Button
+                    danger
+                    icon={<DeleteOutlined />}
+                    loading={deleting === user}
+                    disabled={!!deleting}
+                  >
+                    Remove
+                  </Button>
+                </Popconfirm>,
+              ]}
+            >
+              <List.Item.Meta
+                avatar={<Avatar icon={<UserOutlined />} />}
+                title={<Typography.Text>{user}</Typography.Text>}
+                description="Has access to this course"
+              />
+            </List.Item>
+          )}
+        />
+      </Space>
+    </Modal>
+  );
+};
+
+export default ManageAccessPopup;

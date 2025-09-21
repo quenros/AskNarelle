@@ -14,6 +14,7 @@ load_dotenv()
 # cosmos_port = os.environ.get('COSMOS_PORT')
 
 mongo_uri = os.environ.get('MONGO_URI')
+print(mongo_uri)
 chat_mongo_uri = os.environ.get('CHAT_MONGO_URI')
 
 client = MongoClient(mongo_uri)

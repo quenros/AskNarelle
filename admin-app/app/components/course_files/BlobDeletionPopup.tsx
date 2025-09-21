@@ -1,103 +1,136 @@
-import React from 'react';
-import { useState } from 'react';
-import { Oval } from 'react-loader-spinner';
+import React, { useState } from "react";
+import { Modal, Button, Typography, Space, Tag, Alert, Spin, message } from "antd";
+import { ExclamationCircleOutlined } from "@ant-design/icons";
 
 interface BlobDeletionPopupProps {
-    fileName: string,
-    collectionName: string,
-    domainName: string,
-    id: string,
-    version_id: string,
-    is_root_blob: string,
-    username: string,
-    onBlobDeleted: () => void;
-    onClose: () => void
+  fileName: string;
+  collectionName: string;
+  domainName: string;
+  id: string;
+  version_id: string;
+  is_root_blob: string; // "yes" | "no"
+  username: string;
+  onBlobDeleted: () => void;
+  onClose: () => void;
 }
 
-const BlobDeletionPopup: React.FC<BlobDeletionPopupProps> = ({fileName, collectionName, id, onBlobDeleted, onClose, domainName, version_id, is_root_blob, username}) => {
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+const BlobDeletionPopup: React.FC<BlobDeletionPopupProps> = ({
+  fileName,
+  collectionName,
+  domainName,
+  id,
+  version_id,
+  is_root_blob,
+  username,
+  onBlobDeleted,
+  onClose,
+}) => {
+  const [loading, setLoading] = useState(false);
+  const [open] = useState(true);
 
-  const handleBlobDelete = () => {
-    setIsLoading(true);
-    fetch(`https://asknarelle-backend.azurewebsites.net/api/${collectionName}/${domainName}/deletedocument`, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(
-        { 
-        _id: id, 
-        fileName: fileName,
-        versionId : version_id,
-        isRootBlob: is_root_blob ,
-        username: username,
-        action: "Blob Deletion"
-      }
-        ),
-    })
-    .catch(error => {
-      console.error('Error deleting document:', error);
-    })
-    .finally(() => {
-        setIsLoading(false);
-        onClose();
-        onBlobDeleted();
-    });
-
-  }
-  return (
-    <div className="fixed inset-0 flex items-center justify-center bg-gray-800 bg-opacity-50 z-50">
-      <div className="flex flex-col bg-white p-8 rounded-lg shadow-md relative items-center sm:w-2/6 w-5/6">
-        {isLoading && (
-          <>
-            <div className="flex justify-center mb-4">
-              <Oval
-                height={40}
-                width={40}
-                color="#2c4787"
-                visible={true}
-                ariaLabel='oval-loading'
-                secondaryColor="#2c4787"
-                strokeWidth={2}
-                strokeWidthSecondary={2}
-              />
-            </div>
-            <p className="text-[#1a2d58] text-center mb-4 font-semibold">Deleting</p>
-          </>
-        )}
+  const handleBlobDelete = async () => {
+    try {
+      setLoading(true);
+      const resp = await fetch(
+        `http://localhost:5000/api/${collectionName}/${domainName}/deletedocument`,
         {
-          !isLoading && (
-            <>
-             { (is_root_blob === "yes") ? 
-              (<>
-                <p className='font-semibold text-lg'>Are you sure you want to delete this file?</p>
-                 <p className='text-red-500'>warning: As this the root file, deleting this file will delete all other versions of this file is they exsist</p>
-                 </>
-               ):
-               (<p className='font-semibold text-lg'>Are you sure you want to delete this file from file storage?</p>) 
-           
-            }
-        <div className='flex w-1/2'>
-        <button
-        onClick={handleBlobDelete}
-        className="bg-[#2C3463] text-white font-bold py-2 px-4 rounded mr-5 mt-5 w-2/5 transition-transform duration-300 ease-in-out transform hover:scale-105 hover:bg-[#3C456C]"
-        >
-        Yes
-        </button>
-        <button
-        onClick={onClose}
-        className="bg-[#2C3463] text-white font-bold py-2 px-4 rounded ml-5 mt-5 w-2/5 transition-transform duration-300 ease-in-out transform hover:scale-105 hover:bg-[#3C456C]"
-        >
-        No
-        </button>
-
-
-        </div></>
-          )
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            _id: id,
+            fileName,
+            versionId: version_id,
+            isRootBlob: is_root_blob,
+            username,
+            action: "Blob Deletion",
+          }),
         }
-        
-      </div>
-    </div>
+      );
+
+      const maybeJson = await resp
+        .json()
+        .catch(() => ({ error: `${resp.status} ${resp.statusText}` }));
+
+      if (resp.ok || resp.status === 201) {
+        message.success("File deleted successfully");
+        onBlobDeleted();
+        onClose();
+      } else {
+        const errMsg =
+          typeof maybeJson?.error === "string"
+            ? maybeJson.error
+            : "Failed to delete file";
+        message.error(errMsg);
+      }
+    } catch (e: any) {
+      message.error(e?.message ?? "Error deleting file");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const isRoot = is_root_blob === "yes";
+
+  return (
+    <Modal
+      open={open}
+      title={
+        <Space align="center">
+          <ExclamationCircleOutlined style={{ color: "#faad14" }} />
+          <span>Delete {isRoot ? "root" : "blob"} file?</span>
+        </Space>
+      }
+      onCancel={loading ? undefined : onClose}
+      maskClosable={!loading}
+      closable={!loading}
+      destroyOnClose
+      footer={[
+        <Button key="cancel" onClick={onClose} disabled={loading}>
+          Cancel
+        </Button>,
+        <Button
+          key="delete"
+          danger
+          type="primary"
+          onClick={handleBlobDelete}
+          loading={loading}
+        >
+          Delete
+        </Button>,
+      ]}
+    >
+      <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+        <Space wrap>
+          <Typography.Text strong>File:</Typography.Text>
+          <Typography.Text code>{fileName}</Typography.Text>
+          {isRoot ? <Tag color="blue">Root</Tag> : <Tag>Derived</Tag>}
+          {version_id ? <Tag color="default">ver: {version_id}</Tag> : null}
+        </Space>
+
+        {isRoot ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="Deleting the root blob"
+            description="This will remove the base file and may affect any derived versions if they exist."
+          />
+        ) : (
+          <Alert
+            type="info"
+            showIcon
+            message="Delete from storage"
+            description="This removes this specific blob from file storage."
+          />
+        )}
+
+        {loading && (
+          <Space align="center">
+            <Spin />
+            <Typography.Text>Deleting…</Typography.Text>
+          </Space>
+        )}
+      </Space>
+    </Modal>
   );
 };
 

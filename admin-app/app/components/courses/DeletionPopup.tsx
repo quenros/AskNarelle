@@ -1,91 +1,77 @@
-import React from 'react';
-import { useState, useEffect } from 'react';
-import { Oval } from 'react-loader-spinner';
+import React, { useState } from 'react';
+import { Modal, Button, Typography, Alert, Spin, message } from 'antd';
 
 interface DeletionPopupProps {
   onClose: () => void;
   onCourseDeleted: () => void;
   courseName: string;
-  username: string
+  username: string; 
 }
 
+const DeletionPopup: React.FC<DeletionPopupProps> = ({ onClose, onCourseDeleted, courseName }) => {
+  const [isLoading, setIsLoading] = useState(false);
 
+  const handleDelete = async () => {
+    try {
+      setIsLoading(true);
+      const resp = await fetch('http://localhost:5000/api/deletecourse', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collectionName: courseName }),
+      });
 
-const DeletionPopup: React.FC<DeletionPopupProps> = ({ onClose, onCourseDeleted, courseName, username}) => {
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-
-  const handleDelete = () => {
-    setIsLoading(true)
-    fetch('https://asknarelle-backend.azurewebsites.net/api/deletecourse', {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ collectionName: courseName }),
-    })
-    .then(response => {
-      if (response.status === 201) {
-        console.log("Course deleted successfully")
-      } else if(!response.ok) {
-        console.error('Failed to delete index');
+      if (resp.status === 201) {
+        message.success('Course deleted successfully');
+        onCourseDeleted();
+        onClose();
+      } else {
+        const data = await resp.json().catch(() => ({}));
+        const err = typeof data?.message === 'string' ? data.message : 'Failed to delete course';
+        message.error(err);
       }
-    })
-    .catch(error => {
-      console.error('Error deleting course:', error);
-    })
-    .finally(() => {
+    } catch (e: any) {
+      message.error(e?.message ?? 'Error deleting course');
+    } finally {
       setIsLoading(false);
-      onClose();
-      onCourseDeleted();
-  });
-}
+    }
+  };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-gray-800 bg-opacity-50 z-50">
-      <div className="flex flex-col bg-white p-8 rounded-lg shadow-md relative items-center sm:w-2/6 w-5/6">
-        {isLoading && (
-          <>
-            <div className="flex justify-center mb-4">
-              <Oval
-                height={40}
-                width={40}
-                color="#2c4787"
-                visible={true}
-                ariaLabel='oval-loading'
-                secondaryColor="#2c4787"
-                strokeWidth={2}
-                strokeWidthSecondary={2}
-              />
-            </div>
-            <p className="text-[#1a2d58] text-center mb-4 font-semibold">Deleting</p>
-          </>
-        )}
-        {
-          !isLoading && (
-            <>
-                    <p className='font-semibold text-lg'>Are you sure you want to delete the course?</p>
-        <p className='text-[#ff3b3b] text-sm'>Warning: Deleting this folder will delete all the content inside</p>
-        <div className='flex w-1/2'>
-        <button
-        onClick={handleDelete}
-        className="bg-[#2C3463] text-white font-bold py-2 px-4 rounded mr-5 mt-5 w-2/5 transition-transform duration-300 ease-in-out transform hover:scale-105 hover:bg-[#3C456C]"
-        >
-        Yes
-        </button>
-        <button
-        onClick={onClose}
-        className="bg-[#2C3463] text-white font-bold py-2 px-4 rounded ml-5 mt-5 w-2/5 transition-transform duration-300 ease-in-out transform hover:scale-105 hover:bg-[#3C456C]"
-        >
-        No
-        </button>
+    <Modal
+      title="Delete course?"
+      open={true}
+      onCancel={isLoading ? undefined : onClose}
+      footer={[
+        <Button key="cancel" onClick={onClose} disabled={isLoading}>
+          No
+        </Button>,
+        <Button key="ok" type="primary" danger onClick={handleDelete} loading={isLoading}>
+          Yes, delete
+        </Button>,
+      ]}
+      maskClosable={!isLoading}
+      closable={!isLoading}
+      destroyOnClose
+    >
+      <Typography.Paragraph strong>
+        Are you sure you want to delete <Typography.Text code>{courseName}</Typography.Text>?
+      </Typography.Paragraph>
 
+      <Alert
+        type="error"
+        showIcon
+        message="Warning"
+        description="Deleting this folder will delete all the content inside."
+        style={{ marginBottom: 12 }}
+      />
 
-        </div></>
-          )
-        }
-
-      </div>
-    </div>
+      {isLoading && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Spin />
+          <Typography.Text>Deleting…</Typography.Text>
+        </div>
+      )}
+    </Modal>
   );
 };
 

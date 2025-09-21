@@ -3,7 +3,8 @@ import os
 from flask_cors import CORS
 from mongo_helper import  create_document, delete_all_course_documents, delete_document,  get_documents, update_movement_document, get_chatlogs, upload_course, list_courses, upload_domain, get_domain_files, delete_domain_docs, get_course_files_count, get_domain_files_count, get_users_count, get_queries_count, get_queries_by_month, get_queries_by_course, get_user_sentiments, get_user_emotions, check_if_rec_exists, get_course_users,  detele_course_user, add_activity, view_activities
 from blob_storage_helper import createContainer, delete_blob_storage_container, upload_to_azure_blob_storage, delete_from_azure_blob_storage,delete_domain_virtual_folder, generate_sas_token
-from ai_search_helper import storeDocuments, moveToVectorStoreFunction,createIndexFucntion, delete_index_function, delete_embeddings_function
+from ai_search_helper import storeDocuments, moveToVectorStoreFunction,createIndexFunction, delete_index_function, delete_embeddings_function
+# from ai_search_helper_local import (storeDocuments, moveToVectorStoreFunction, createIndexFunction, delete_index_function, delete_embeddings_function)
 from dotenv import load_dotenv
 from azure.storage.blob import BlobServiceClient
 from datetime import datetime
@@ -23,18 +24,17 @@ graph_url = 'https://graph.microsoft.com/v1.0/'
 
 @app.route("/vectorstore", methods=['PUT'])
 def storeInVectorStore():
-    print("Entered Function")
     data = request.json
     containername = data.get('containername')
-    chunksize= int(data.get('chunksize'))
+    chunksize = int(data.get('chunksize'))
     overlap = int(data.get('overlap'))
 
+    result = storeDocuments(containername, chunksize, overlap)
 
-    store_status = storeDocuments(containername, chunksize, overlap)
-    if(store_status == "True"):
+    if result == "True":
         return jsonify({"message": "Data loaded into vectorstore successfully"}), 201
     else:
-        return jsonify({"message": store_status}), 500
+        return jsonify({"error": str(result)}), 500
 
    
 @app.route("/movetovectorstore", methods=['PUT'])
@@ -61,7 +61,7 @@ def createIndex():
     data = request.json
     collection_name = data.get('collectionName')
 
-    create_index_status =  createIndexFucntion(collection_name)
+    create_index_status =  createIndexFunction(collection_name)
     if create_index_status:  
         return jsonify({"message": "Index created successfully"}), 201
     else:
@@ -193,63 +193,99 @@ def upload_blob(collection_name, domain_name, username):
     
 @app.route('/api/<collection_name>/<domain_name>/<username>/createdocument', methods=['PUT'])
 def upload_document(collection_name, domain_name, username):
-     files = request.files.getlist('files')
-     container_name = collection_name.lower().replace(' ', '-')
-     files_with_links = []
-     activities = []
-     container_client = blob_service_client.get_container_client(collection_name)
-     for file in files:
-        blob_client_direct = container_client.get_blob_client(f"{domain_name}/{file.filename}")
-        blob_version = blob_client_direct.get_blob_properties().version_id
-        main_part, fractional_part = blob_version[:-1].split('.')
-        fractional_part = fractional_part[:6] 
-        adjusted_timestamp_str = f"{main_part}.{fractional_part}Z"
-        timestamp_dt = datetime.strptime(adjusted_timestamp_str, '%Y-%m-%dT%H:%M:%S.%fZ')
-        timestamp_dt = utc.localize(timestamp_dt)
+    files = request.files.getlist('files')
+    container_name = collection_name.lower().replace(' ', '-')
+    files_with_links, activities = [], []
 
-        local_tz = timezone('Asia/Singapore')
-        local_timestamp_dt = timestamp_dt.astimezone(local_tz)
-    
-        date_str = local_timestamp_dt.date().isoformat()
-        time_str = local_timestamp_dt.strftime('%H:%M:%S')
+    # only text-like files are vectorized
+    text_exts = {'.pdf', '.docx', '.pptx', '.txt'}
 
-        print(date_str)
-        print(time_str)
+    try:
+        container_client = blob_service_client.get_container_client(container_name)
 
-        print(f"this is blob version: {blob_version}")
-        sas_token = generate_sas_token(container_name, f'{domain_name}/{file.filename}')
-        blob_url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{container_name}/{f'{domain_name}/{file.filename}'}?{sas_token}"
-        files_with_links.append({
-            "course_name" : container_name,
-            "domain": domain_name,
-            "name": file.filename,
-            "url": blob_url,
-            "blob_name": f'{domain_name}/{file.filename}',
-            "version_id": blob_version,
-            "date_str": date_str,
-            "time_str": time_str,
-            "in_vector_store": 'yes',
-            "is_root_blob": 'yes',
-        
-        })
-        activities.append({
-            "uername": username,
-            "course_name": collection_name,
-            "domain": domain_name,
-            "file": file.filename,
-            "action": "Uploaded File",
-            "date_str": date_str,
-            "time_str": time_str
-        })
-     create_document_success = create_document(files_with_links)
-     if create_document_success:
-        add_activity_status = add_activity(activities)
-        if add_activity_status:
-            return jsonify({"message": "Documents created successfully!"}), 201
+        for file in files:
+            blob_path = f"{domain_name}/{file.filename}"
+            blob_client_direct = container_client.get_blob_client(blob_path)
+
+            # Properties
+            props = blob_client_direct.get_blob_properties()
+            version_id = getattr(props, "version_id", None)  # may be None
+            last_modified_utc = props.last_modified  # tz-aware datetime in UTC
+
+            # Derive local timestamp (Asia/Singapore)
+            local_tz = timezone('Asia/Singapore')
+
+            # Try to parse a time from version_id when available (Azure often returns ISO-like with 7-digit micros)
+            date_str = time_str = None
+            if isinstance(version_id, str):
+                try:
+                    # Normalize fractional seconds to 6 digits for strptime
+                    raw = version_id
+                    if raw.endswith('Z'):
+                        raw = raw[:-1]
+                        if '.' in raw:
+                            main, frac = raw.split('.', 1)
+                            frac = ''.join(ch for ch in frac if ch.isdigit())[:6]
+                            raw = f"{main}.{frac}Z"
+                        else:
+                            raw = f"{raw}Z"
+                    ts_utc = datetime.strptime(raw, '%Y-%m-%dT%H:%M:%S.%fZ')
+                    ts_utc = utc.localize(ts_utc)
+                    ts_local = ts_utc.astimezone(local_tz)
+                    date_str = ts_local.date().isoformat()
+                    time_str = ts_local.strftime('%H:%M:%S')
+                except Exception:
+                    # fallback to last_modified below
+                    pass
+
+            if not date_str or not time_str:
+                ts_local = last_modified_utc.astimezone(local_tz)
+                date_str = ts_local.date().isoformat()
+                time_str = ts_local.strftime('%H:%M:%S')
+
+            # SAS URL
+            sas_token = generate_sas_token(container_name, blob_path)
+            blob_url = f"https://{blob_service_client.account_name}.blob.core.windows.net/{container_name}/{blob_path}?{sas_token}"
+
+            # Flag whether this file is vectorized (videos -> no)
+            ext = os.path.splitext(file.filename)[1].lower()
+            in_vector = 'yes' if ext in text_exts else 'no'
+
+            files_with_links.append({
+                "course_name": container_name,
+                "domain": domain_name,
+                "name": file.filename,
+                "url": blob_url,
+                "blob_name": blob_path,
+                "version_id": version_id,               # may be None; that’s fine to store
+                "date_str": date_str,
+                "time_str": time_str,
+                "in_vector_store": in_vector,
+                "is_root_blob": 'yes',
+            })
+
+            activities.append({
+                "uername": username,
+                "course_name": collection_name,
+                "domain": domain_name,
+                "file": file.filename,
+                "action": "Uploaded File",
+                "date_str": date_str,
+                "time_str": time_str
+            })
+
+        create_document_success = create_document(files_with_links)
+        if create_document_success:
+            if add_activity(activities):
+                return jsonify({"message": "Documents created successfully!"}), 201
+            else:
+                return jsonify({'error': 'Failed to upload activity status'}), 500
         else:
-            return jsonify({'error': 'Failed to upload activity status'}), 500
-     else:
-        return jsonify({'error': 'Failed to create documents'}), 500
+            return jsonify({'error': 'Failed to create documents'}), 500
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
         
 
 @app.route('/api/deletecourse', methods=['DELETE'])

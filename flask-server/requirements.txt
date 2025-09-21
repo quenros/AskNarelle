@@ -15,5 +15,7 @@ python-docx
 PyMuPDF
 gunicorn
 dnspython
-
-
+python-pptx
+chromadb
+sentence-transformers
+langchain-community

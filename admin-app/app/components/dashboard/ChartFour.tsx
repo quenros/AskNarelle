@@ -25,7 +25,7 @@ const ChartFour: React.FC = () => {
   const[categories,setCategories] = useState<string[]>([])
 
   useEffect(() => {
-    fetch(`https://asknarelle-backend.azurewebsites.net/chats/userEmotions/${username}`)
+    fetch(`http://localhost:5000/chats/userEmotions/${username}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Failed to fetch total users');

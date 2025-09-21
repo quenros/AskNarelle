@@ -1,149 +1,184 @@
-"use client"
-import { Suspense } from 'react';
-import { useState, useEffect} from 'react';
+"use client";
+
+import { Suspense, useEffect, useState } from "react";
 import DomainCard from "../../components/domains/DomainCard";
-import { useSearchParams } from 'next/navigation';
-import DomainPopup from '../../components/domains/DomainPopup';
-import DomainDeletionPopup from '../../components/domains/DomainDeletionPopup';
+import { useSearchParams } from "next/navigation";
+import DomainPopup from "../../components/domains/DomainPopup";
+import DomainDeletionPopup from "../../components/domains/DomainDeletionPopup";
 import { MdDriveFolderUpload } from "react-icons/md";
 import withAuth from "../../components/authentication/WithAuth";
 import { msalConfig } from "@/authConfig";
-import { PublicClientApplication} from "@azure/msal-browser";
-import NotFoundPage from '../../components/authentication/404';
-import ForbiddenPage from '../../components/authentication/403';
+import { PublicClientApplication } from "@azure/msal-browser";
+import NotFoundPage from "../../components/authentication/404";
+import ForbiddenPage from "../../components/authentication/403";
 
-interface Category{
-  'domain': string,
-  'usertype': string
+// Ant Design
+import {
+  Typography,
+  Button,
+  Row,
+  Col,
+  Card,
+  Empty,
+  Space,
+  Divider,
+} from "antd";
 
+const { Title, Text } = Typography;
+
+interface Category {
+  domain: string;
+  usertype: string;
 }
+
 const msalInstance = new PublicClientApplication(msalConfig);
 
-function DomainContent({params} : {params: {course: string}}) {
-
+function DomainContent({ params }: { params: { course: string } }) {
   const [showPopup, setShowPopup] = useState<boolean>(false);
-  const [domainCreated, setDomainCreated] = useState<boolean>(true); 
+  const [domainCreated, setDomainCreated] = useState<boolean>(true);
   const [domains, setDomains] = useState<Category[]>([]);
-  const [domainDeleted, setDomainDeleted] = useState<boolean>(true); 
-  const[domainName, setDomainName] = useState<string>('')
-  const[showDeletionPopup, setShowDeletionPopup] = useState<boolean>(false);
-  const[course, setCourse] = useState<string>('');
-  const[authorised, setAuthorised] = useState<boolean>(true)
-  const[coursePresent, setCoursePresent] = useState<boolean>(true)
+  const [domainDeleted, setDomainDeleted] = useState<boolean>(true);
+  const [domainName, setDomainName] = useState<string>("");
+  const [showDeletionPopup, setShowDeletionPopup] = useState<boolean>(false);
+  const [course, setCourse] = useState<string>("");
+  const [authorised, setAuthorised] = useState<boolean>(true);
+  const [coursePresent, setCoursePresent] = useState<boolean>(true);
 
   const searchParams = useSearchParams();
-  const collectionName = params.course;//searchParams.get("query") || '';
+  const collectionName = params.course; // searchParams.get("query") || '';
 
   const accounts = msalInstance.getAllAccounts();
-  const username = accounts[0]?.username; 
+  const username = accounts[0]?.username;
 
-  // const domains = ['Lectures', 'Tutorials', 'Labs'];
+  const handleButtonClick = () => setShowPopup(true);
+  const handleClosePopup = () => setShowPopup(false);
 
-  const handleButtonClick = (): void => {
-    setShowPopup(true);
-  };
+  const handleDomainCreated = () => setDomainCreated(!domainCreated);
+  const handleDomainDeleted = () => setDomainDeleted(!domainDeleted);
 
-  const handleDomainCreated = () => {
-    setDomainCreated(!domainCreated);
-  };
-
-  const handleDomainDeleted = () => {
-    setDomainDeleted(!domainDeleted);
-  };
-
-  const handlePressDelete = (courseName: string, domainName: string): void => {
-    setCourse(courseName)
-    setDomainName(domainName)
+  const handlePressDelete = (courseName: string, dName: string) => {
+    setCourse(courseName);
+    setDomainName(dName);
     setShowDeletionPopup(true);
-  }
-
-  const handleClosePopup = (): void => {
-    setShowPopup(false);
   };
-
-  const handleCloseDeletionPopup = (): void => {
-    setShowDeletionPopup(false);
-  }
+  const handleCloseDeletionPopup = () => setShowDeletionPopup(false);
 
   useEffect(() => {
-    console.log(collectionName)
-    fetch(`https://asknarelle-backend.azurewebsites.net/api/collections/${username}/${collectionName}/domains`)
-    .then(response => {
-      if (response.status === 403) {
-        setAuthorised(false)
-      }
-      else if(response.status === 404){
-        setCoursePresent(false)
-      }
-      else if (response.status === 500){
-        throw new Error('Failed to fetch course domains');
-      }
-      else{
+    if (!username) return;
+
+    fetch(`http://localhost:5000/api/collections/${username}/${collectionName}/domains`)
+      .then((response) => {
+        if (response.status === 403) {
+          setAuthorised(false);
+          return null;
+        } else if (response.status === 404) {
+          setCoursePresent(false);
+          return null;
+        } else if (!response.ok) {
+          throw new Error("Failed to fetch course domains");
+        }
         return response.json();
-      }
-    })
-    .then((domains: Category[]) => {
-      setDomains(domains);
-    })
-    .catch(error => {
-      console.error('Error fetching collections:', error);
-    });
-}, [domainCreated, domainDeleted, collectionName, username]); 
+      })
+      .then((data) => {
+        if (data) setDomains(data as Category[]);
+      })
+      .catch((error) => {
+        console.error("Error fetching collections:", error);
+      });
+  }, [domainCreated, domainDeleted, collectionName, username]);
 
   return (
-    <main className="flex h-screen mt-[8vh] lg:mt-[0vh] flex-col p-10 sm:p-24 bg-gray-100">   
-      <div className="flex flex-row justify-between">
-        {
-          authorised && coursePresent &&
+    <main style={{ marginTop: "8vh", padding: 24, background: "#f5f5f5", minHeight: "100vh" }}>
+      {/* Header */}
+      {authorised && coursePresent && (
+        <Card bordered={false} style={{ marginBottom: 16 }}>
+          <Row align="middle" justify="space-between" gutter={[16, 16]}>
+            <Col>
+              <Space direction="vertical" size={4}>
+                <Title level={3} style={{ margin: 0, color: "#2C3463" }}>
+                  Categories
+                </Title>
+                <Divider style={{ margin: 0, borderColor: "#2C3463", width: 84 }} />
+                <Text type="secondary">Manage your course categories</Text>
+              </Space>
+            </Col>
+            <Col>
+              {domains?.length > 0 && (
+                <Button type="primary" onClick={handleButtonClick}>
+                  Add New Category
+                </Button>
+              )}
+            </Col>
+          </Row>
+        </Card>
+      )}
 
-      <div className="font-semibold relative w-10 text-xl font-nunito">
-        Categories
-        <div className="absolute left-2 w-full h-1 bg-[#2C3463]"></div>
-      </div>
-}
-       <div>
-       {authorised && coursePresent && domains?.length > 0 && <button onClick={handleButtonClick} className="bg-[#2C3463] text-white py-2 px-4 rounded-lg font-normal transition-transform duration-300 ease-in-out transform hover:scale-105 hover:bg-[#3C456C]">Add New Category</button>}
-       </div>
-      </div>
-      {
-        coursePresent ? (
-           authorised ? (
-             domains?.length > 0 ? (
-          <div className="flex flex-wrap mt-5">
-            {domains?.map((domain: Category, index: number) => (
-              <DomainCard key={index} courseName={collectionName} domainName={domain['domain']} onDomainDeleted={handlePressDelete} user_type={domain['usertype']}/>
-            ))}
-          </div>
-
+      {/* Content states */}
+      {coursePresent ? (
+        authorised ? (
+          domains?.length > 0 ? (
+            <Row gutter={[16, 16]}>
+              {domains.map((domain: Category, index: number) => (
+                <Col key={index} xs={24} sm={12} md={8} lg={6} xl={6}>
+                  <DomainCard
+                    courseName={collectionName}
+                    domainName={domain.domain}
+                    onDomainDeleted={handlePressDelete}
+                    user_type={domain.usertype}
+                  />
+                </Col>
+              ))}
+            </Row>
+          ) : (
+            <Card style={{ maxWidth: 900, margin: "48px auto" }}>
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={
+                  <Space direction="vertical" size={4}>
+                    <MdDriveFolderUpload size={40} color="#2C3463" />
+                    <Text strong>Create a new category</Text>
+                  </Space>
+                }
+              >
+                <Button type="primary" onClick={handleButtonClick}>
+                  Add New Category
+                </Button>
+              </Empty>
+            </Card>
+          )
         ) : (
-          <div className="flex h-screen flex-col items-center justify-center">
-          <div className="flex  flex-col bg-white sm:w-4/5 w-full border border-dotted border-[#3F50AD] p-4 mx-auto rounded-lg items-center">
-          <MdDriveFolderUpload  size={50} color="#2C3463"/>
-          <p className="font-semibold text-lg mt-2 font-nunito">Create a new category</p>
-          <button onClick={handleButtonClick} className="bg-[#2C3463] text-white py-2 px-4 rounded-lg font-normal mt-5 sm:w-2/5 w-full  transition-transform duration-300 ease-in-out transform hover:scale-105 hover:bg-[#3C456C] font-nunito">Add New Folder</button>
-          </div>
-        </div>
+          <ForbiddenPage />
         )
       ) : (
-          <ForbiddenPage/>
-        )
-      ) : (
-        <NotFoundPage/>
-      )
-      }
-     
-      {showPopup && <DomainPopup onClose={handleClosePopup} onDomainCreated={handleDomainCreated} collectionName = {collectionName}/>}
-      {showDeletionPopup && <DomainDeletionPopup onClose={handleCloseDeletionPopup} onCourseDeleted={handleDomainDeleted} courseName= {collectionName} domain={domainName}/>}
+        <NotFoundPage />
+      )}
+
+      {/* Popups (logic unchanged) */}
+      {showPopup && (
+        <DomainPopup
+          onClose={handleClosePopup}
+          onDomainCreated={handleDomainCreated}
+          collectionName={collectionName}
+        />
+      )}
+      {showDeletionPopup && (
+        <DomainDeletionPopup
+          onClose={handleCloseDeletionPopup}
+          onCourseDeleted={handleDomainDeleted}
+          courseName={collectionName}
+          domain={domainName}
+        />
+      )}
     </main>
   );
 }
 
 const AuthenticatedDomainContent = withAuth(DomainContent);
 
-export default function DomainPage({params}: {params: {course: string}}): JSX.Element {
+export default function DomainPage({ params }: { params: { course: string } }): JSX.Element {
   return (
     <Suspense fallback={<div>Loading...</div>}>
-      <AuthenticatedDomainContent params={params}/>
+      <AuthenticatedDomainContent params={params} />
     </Suspense>
   );
 }

@@ -1,0 +1,27 @@
+# Dockerfile.backend
+FROM python:3.12.2-slim
+
+# System deps (same as you had)
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+     libmagic1 libgl1-mesa-glx libglib2.0-0 \
+  && rm -rf /var/lib/apt/lists/*
+
+# Set the working directory inside the container
+WORKDIR /flask-backend
+
+# Copy Python dependency spec first (better layer caching)
+COPY flask-server/requirements.txt ./requirements.txt
+
+# Install Python deps
+RUN pip install --upgrade pip \
+  && pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the backend app
+COPY flask-server/. .
+
+# Expose Flask/Gunicorn port
+EXPOSE 5000
+
+# Start the app using gunicorn (same as your original)
+CMD ["gunicorn", "app:app", "-b", "0.0.0.0:5000", "-w", "4", "--timeout", "600"]

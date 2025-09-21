@@ -1,146 +1,199 @@
-import React from 'react';
-import { useState , ChangeEvent, useEffect} from 'react';
-import { Oval } from 'react-loader-spinner';
-import Slider from 'rc-slider';
-import 'rc-slider/assets/index.css';
+import React, { useState } from "react";
+import {
+  Modal,
+  Button,
+  Typography,
+  Space,
+  Slider,
+  Switch,
+  Alert,
+  Spin,
+  message,
+  Tag,
+} from "antd";
+import { CloudUploadOutlined } from "@ant-design/icons";
 
 interface FileMovementPopupProps {
-    fileName: string,
-    collectionName: string,
-    domainName: string,
-    id: string,
-    version_id: string,
-    onFileMoved: () => void,
-    onClose: () => void,
-    username: string
+  fileName: string;
+  collectionName: string;
+  domainName: string;
+  id: string;
+  version_id: string;
+  username: string;
+  onFileMoved: () => void;
+  onClose: () => void;
 }
 
+const FileMovementPopup: React.FC<FileMovementPopupProps> = ({
+  fileName,
+  collectionName,
+  domainName,
+  id,
+  version_id,
+  username,
+  onFileMoved,
+  onClose,
+}) => {
+  const [open] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [chunkSize, setChunkSize] = useState(1000);
+  const [overlap, setOverlap] = useState(100);
 
-const FileMovementPopup: React.FC<FileMovementPopupProps> = ({fileName, collectionName, id, onFileMoved, onClose, domainName, version_id, username}) => {
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const[showSliders, setShowSliders] = useState<boolean>(false);
-  const[tick, setTick] = useState<boolean>(false);
-  const[chunkSize, setChunkSize] = useState<number>(1000);
-  const[overlap, setOverlap] = useState<number>(100);
-
-
-  const handleFileMovement = () => {
-    setIsLoading(true);
-    fetch(`https://asknarelle-backend.azurewebsites.net/movetovectorstore`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(
-        { 
-        containername: collectionName, 
-        domainname: domainName,
-        versionid: version_id,
-        filename: fileName,
-        chunksize: chunkSize,
-        overlap: overlap,
-
-     }
-        ),
-    })
-    .then(response => {
-      if (response.status === 201) {
-        return fetch(`https://asknarelle-backend.azurewebsites.net/updatemovement`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ 
-              _id: id,
-              collectionName: collectionName,
-              domainName: domainName,
-              fileName: fileName,
-              versionId : version_id ,
-              username: username
-            }),
-          });
-      } else if(!response.ok) {
-        console.error('Failed to delete document');
-      }
-    })
-    .catch(error => {
-      console.error('Error deleting document:', error);
-    })
-    .finally(() => {
-        setIsLoading(false);
-        onClose();
-        onFileMoved();
-    });
-
-  }
-
-  const handleCheckboxChange = (e: ChangeEvent<HTMLInputElement>)=> {
-    setTick(e.target.checked);
-    setShowSliders(e.target.checked);
-    
-  }
-
-
-  const handleChunkSliderChange = (value: number | number[]) => {
-    if (typeof value === 'number') {
-        setChunkSize(value)
+  const doJSON = async (resp: Response) => {
+    try {
+      return await resp.json();
+    } catch {
+      return {};
     }
   };
 
-  const handleOverlapSliderChange = (value: number | number[]) => {
-    if(typeof value === 'number'){
-      setOverlap(value)
+  const handleMove = async () => {
+    try {
+      setLoading(true);
+
+      // 1) Move to vector store (embed + upsert)
+      const moveResp = await fetch(`http://localhost:5000/movetovectorstore`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          containername: collectionName,
+          domainname: domainName,
+          versionid: version_id,
+          filename: fileName,
+          chunksize: chunkSize,
+          overlap: overlap,
+        }),
+      });
+
+      if (!(moveResp.ok || moveResp.status === 201)) {
+        const j = await doJSON(moveResp);
+        const err =
+          (typeof j?.error === "string" && j.error) ||
+          `${moveResp.status} ${moveResp.statusText}`;
+        throw new Error(err || "Failed to move file to vector store");
+      }
+
+      // 2) Update DB flag / activity
+      const updResp = await fetch(`http://localhost:5000/updatemovement`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          _id: id,
+          collectionName,
+          domainName,
+          fileName,
+          versionId: version_id,
+          username,
+        }),
+      });
+
+      if (!(updResp.ok || updResp.status === 201)) {
+        const j = await doJSON(updResp);
+        const err =
+          (typeof j?.error === "string" && j.error) ||
+          `${updResp.status} ${updResp.statusText}`;
+        throw new Error(err || "Failed to update movement status");
+      }
+
+      message.success("Moved to vector store");
+      onFileMoved();
+      onClose();
+    } catch (e: any) {
+      message.error(e?.message ?? "Move failed");
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-gray-800 bg-opacity-50 z-50">
-      <div className=" bg-white p-8 rounded-lg shadow-md relative sm:w-2/6 w-5/6">
-        {isLoading && (
-          <>
-            <div className="flex justify-center mb-4">
-              <Oval
-                height={40}
-                width={40}
-                color="#2c4787"
-                visible={true}
-                ariaLabel='oval-loading'
-                secondaryColor="#2c4787"
-                strokeWidth={2}
-                strokeWidthSecondary={2}
+    <Modal
+      open={open}
+      title={
+        <Space align="center">
+          <CloudUploadOutlined />
+          <span>Move to vector store?</span>
+        </Space>
+      }
+      onCancel={loading ? undefined : onClose}
+      maskClosable={!loading}
+      closable={!loading}
+      destroyOnClose
+      footer={[
+        <Button key="cancel" onClick={onClose} disabled={loading}>
+          Cancel
+        </Button>,
+        <Button
+          key="move"
+          type="primary"
+          icon={<CloudUploadOutlined />}
+          loading={loading}
+          onClick={handleMove}
+        >
+          Move
+        </Button>,
+      ]}
+    >
+      <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+        <Space wrap>
+          <Typography.Text strong>File:</Typography.Text>
+          <Typography.Text code>{fileName}</Typography.Text>
+          {version_id ? <Tag>ver: {version_id}</Tag> : null}
+        </Space>
+
+        <Alert
+          type="info"
+          showIcon
+          message="What happens next?"
+          description="The file will be embedded and added to your vector index so it becomes searchable. Large files may take longer."
+        />
+
+        <Space align="center">
+          <Switch
+            checked={showAdvanced}
+            onChange={setShowAdvanced}
+            disabled={loading}
+          />
+          <Typography.Text>Advanced chunk settings</Typography.Text>
+        </Space>
+
+        {showAdvanced && (
+          <Space direction="vertical" style={{ width: "100%" }}>
+            <div>
+              <Typography.Text strong>Chunk size</Typography.Text>
+              <Slider
+                min={500}
+                max={2000}
+                step={50}
+                value={chunkSize}
+                onChange={(v) => setChunkSize(v as number)}
+                disabled={loading}
+                tooltip={{ open: true }}
               />
             </div>
-            <p className="text-[#1a2d58] text-center mb-4 font-semibold">Moving File to Vector store</p>
-          </>
+            <div>
+              <Typography.Text strong>Overlap</Typography.Text>
+              <Slider
+                min={0}
+                max={500}
+                step={10}
+                value={overlap}
+                onChange={(v) => setOverlap(v as number)}
+                disabled={loading}
+                tooltip={{ open: true }}
+              />
+            </div>
+          </Space>
         )}
-        {
-          !isLoading && (
-            <>
-            <p className='font-semibold text-center text-lg'>Are you sure you want to Move this file to vector store?</p>
 
-          
-        <div className='flex justify-center'>
-        <button
-        onClick={handleFileMovement}
-        className="bg-[#2C3463] text-white font-bold py-2 px-4 rounded mr-5 mt-5 w-2/12 transition-transform duration-300 ease-in-out transform hover:scale-105 hover:bg-[#3C456C]"
-        >
-        Yes
-        </button>
-        <button
-        onClick={onClose}
-        className="bg-[#2C3463] text-white font-bold py-2 px-4 rounded ml-5 mt-5 w-2/12 transition-transform duration-300 ease-in-out transform hover:scale-105 hover:bg-[#3C456C]"
-        >
-        No
-        </button>
-
-
-        </div>
-        </>
-          )
-        }
-        
-      </div>
-    </div>
+        {loading && (
+          <Space align="center">
+            <Spin />
+            <Typography.Text>Moving file to vector store…</Typography.Text>
+          </Space>
+        )}
+      </Space>
+    </Modal>
   );
 };
 

@@ -1,230 +1,350 @@
 "use client";
 
-import React from 'react';
-import { useState, useEffect } from 'react';
-import DocumentPopup from '../../../components/course_files/DocumentPopup';
-import { AiOutlineFileAdd } from "react-icons/ai";
-import { useSearchParams } from 'next/navigation';
-import FileCard from '../../../components/course_files/FileCard';
-import { CiSearch } from "react-icons/ci";
-import FileDeletionPopup from '../../../components/course_files/FileDeletionPopup';
-import FileMovementPopup from '../../../components/course_files/FileMovementPopup';
-import BlobDeletionPopup from '../../../components/course_files/BlobDeletionPopup';
-import { Suspense } from 'react';
-import FilesTable from '../../../components/course_files/FilesTable';
-import withAuth from "../../../components/authentication/WithAuth";
+import React, { useEffect, useMemo, useState } from "react";
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import { PublicClientApplication } from "@azure/msal-browser";
 import { msalConfig } from "@/authConfig";
-import { PublicClientApplication} from "@azure/msal-browser";
-import NotFoundPage from '../../../components/authentication/404';
-import ForbiddenPage from '../../../components/authentication/403';
 
-interface Document{
-    _id: string;
-    name: string;
-    url: string;
-    version_id: string;
-    blob_name: string;
-    domain: string;
-    date_str: string;
-    time_str: string;
-    in_vector_store: string;
-    is_root_blob: string;
-    course_name: string
+import DocumentPopup from "../../../components/course_files/DocumentPopup";
+import FileDeletionPopup from "../../../components/course_files/FileDeletionPopup";
+import FileMovementPopup from "../../../components/course_files/FileMovementPopup";
+import BlobDeletionPopup from "../../../components/course_files/BlobDeletionPopup";
+import FilesTable from "../../../components/course_files/FilesTable";
+import withAuth from "../../../components/authentication/WithAuth";
+import NotFoundPage from "../../../components/authentication/404";
+import ForbiddenPage from "../../../components/authentication/403";
+
+import {
+  Typography,
+  Space,
+  Button,
+  Input,
+  Empty,
+  Spin,
+  App,
+  Flex,
+} from "antd";
+import {
+  PlusOutlined,
+  SearchOutlined,
+  FolderOpenOutlined,
+} from "@ant-design/icons";
+
+interface Document {
+  _id: string;
+  name: string;
+  url: string;
+  version_id: string;
+  blob_name: string;
+  domain: string;
+  date_str: string;
+  time_str: string;
+  in_vector_store: string;
+  is_root_blob: string;
+  course_name: string;
 }
 
+const { Title, Text } = Typography;
 const msalInstance = new PublicClientApplication(msalConfig);
 
-function Fileslist({params} : {params: {domain: string, course: string}}): JSX.Element{
-    const [message, setMessage] = useState<Document[]>([]);
-    const [showPopup, setShowPopup] = useState<boolean>(false);
-    const [fileCreated, setFileCreated] = useState<boolean>(true); 
-    const [fileDeleted, setFileDeleted] = useState<boolean>(true); 
-    const [fileMoved, setFileMoved] = useState<boolean>(true);
-    const [blobDeleted, setBlobDeleted] = useState<boolean>(true);
-    const [searchQuery, setSearchQuery] = useState<string>('');
-    const [showDeletionPopup, setShowDeletionPopup] = useState<boolean>(false);
-    const [showFileMovementPopup, setShowFileMovementPopup] = useState<boolean>(false);
-    const [showBlobDeletionPopup, setShowBlobDeletionPopup] = useState<boolean>(false);
-    const[fileName, setFileName] = useState<string>('');
-    const[collection, setCollection] = useState<string>('');
-    const[docId, setDocId] = useState<string>('');
-    const[versionId, setVersionId] = useState<string>('');
-    const[isRootBlob, setIsRootBlob] = useState<string>('');
-    const[authorised, setAuthorised] = useState<boolean>(true)
-    const[coursePresent, setCoursePresent] = useState<boolean>(true)
+function Fileslist({
+  params,
+}: {
+  params: { domain: string; course: string };
+}): JSX.Element {
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
 
-    const searchParams = useSearchParams();
-    const collectionName = params.course//searchParams.get("course") || '';
-    const domainName = params.domain//searchParams.get("domain") || '';
+  const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
+  const [toggleCreated, setToggleCreated] = useState<boolean>(false);
+  const [toggleDeleted, setToggleDeleted] = useState<boolean>(false);
+  const [toggleMoved, setToggleMoved] = useState<boolean>(false);
+  const [toggleBlobDeleted, setToggleBlobDeleted] = useState<boolean>(false);
 
-    const accounts = msalInstance.getAllAccounts();
-    const username = accounts[0]?.username; 
-  
-    const handleFileCreated = () => {
-      setFileCreated(!fileCreated);
+  const [searchQuery, setSearchQuery] = useState<string>("");
+
+  const [showDeletionPopup, setShowDeletionPopup] = useState<boolean>(false);
+  const [showMovementPopup, setShowMovementPopup] = useState<boolean>(false);
+  const [showBlobDeletionPopup, setShowBlobDeletionPopup] = useState<boolean>(false);
+
+  const [selectedFileName, setSelectedFileName] = useState<string>("");
+  const [selectedCollection, setSelectedCollection] = useState<string>("");
+  const [selectedDocId, setSelectedDocId] = useState<string>("");
+  const [selectedVersionId, setSelectedVersionId] = useState<string>("");
+  const [selectedIsRootBlob, setSelectedIsRootBlob] = useState<string>("");
+
+  const [authorised, setAuthorised] = useState<boolean>(true);
+  const [coursePresent, setCoursePresent] = useState<boolean>(true);
+
+  const { message } = App.useApp?.() ?? { message: undefined }; // optional; only if you wrap App at root
+
+  const searchParams = useSearchParams();
+  // You already pass via route params; leaving these here in case you later use search params
+  const collectionName = params.course;
+  const domainName = params.domain;
+
+  const accounts = msalInstance.getAllAccounts();
+  const username = accounts?.[0]?.username ?? "";
+
+  // Actions that toggle fetch refresh
+  const onFileCreated = () => setToggleCreated((v) => !v);
+  const onFileDeleted = () => setToggleDeleted((v) => !v);
+  const onFileMoved = () => setToggleMoved((v) => !v);
+  const onBlobDeleted = () => setToggleBlobDeleted((v) => !v);
+
+  // Button handlers
+  const openUploadModal = () => setShowUploadModal(true);
+  const closeUploadModal = () => setShowUploadModal(false);
+
+  const handlePressDelete = (
+    id: string,
+    collection: string,
+    file: string,
+    version_id: string,
+    is_root_blob: string
+  ) => {
+    setSelectedFileName(file);
+    setSelectedCollection(collection);
+    setSelectedDocId(id);
+    setSelectedVersionId(version_id);
+    setSelectedIsRootBlob(is_root_blob);
+    setShowDeletionPopup(true);
+  };
+
+  const handlePressMovement = (
+    id: string,
+    collection: string,
+    file: string,
+    version_id: string
+  ) => {
+    setSelectedFileName(file);
+    setSelectedCollection(collection);
+    setSelectedDocId(id);
+    setSelectedVersionId(version_id);
+    setShowMovementPopup(true);
+  };
+
+  const handlePressBlobDelete = (
+    id: string,
+    collection: string,
+    file: string,
+    version_id: string,
+    is_root_blob: string
+  ) => {
+    setSelectedFileName(file);
+    setSelectedCollection(collection);
+    setSelectedDocId(id);
+    setSelectedVersionId(version_id);
+    setSelectedIsRootBlob(is_root_blob);
+    setShowBlobDeletionPopup(true);
+  };
+
+  const closeDeletionPopup = () => setShowDeletionPopup(false);
+  const closeMovementPopup = () => setShowMovementPopup(false);
+  const closeBlobDeletionPopup = () => setShowBlobDeletionPopup(false);
+
+  // Fetch
+  useEffect(() => {
+    let abort = false;
+    setLoading(true);
+    fetch(
+      `http://localhost:5000/api/collections/${username}/${collectionName}/${domainName}`
+    )
+      .then((response) => {
+        if (abort) return null;
+        if (response.status === 403) {
+          setAuthorised(false);
+          setDocuments([]);
+          return null;
+        } else if (response.status === 404) {
+          setCoursePresent(false);
+          setDocuments([]);
+          return null;
+        } else if (response.status === 500) {
+          throw new Error("Failed to fetch course documents");
+        } else {
+          return response.json();
+        }
+      })
+      .then((docs: Document[] | null) => {
+        if (abort || !docs) return;
+        setDocuments(docs);
+      })
+      .catch((err) => {
+        console.error("Error fetching documents:", err);
+      })
+      .finally(() => {
+        if (!abort) setLoading(false);
+      });
+
+    return () => {
+      abort = true;
     };
+  }, [
+    toggleCreated,
+    toggleDeleted,
+    toggleMoved,
+    toggleBlobDeleted,
+    collectionName,
+    domainName,
+    username,
+  ]);
 
-    const handleFileDeleted = () => {
-      setFileDeleted(!fileDeleted);
-    };
+  const filteredFiles = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return documents;
+    return documents.filter((d) => d?.name?.toLowerCase().includes(q));
+  }, [searchQuery, documents]);
 
-    const handleFileMoved = () => {
-      setFileMoved(!fileMoved)
-    }
+  // Render gates for 404/403
+  if (!coursePresent) return <NotFoundPage />;
+  if (!authorised) return <ForbiddenPage />;
 
-    const handleBlobDeleted = () => {
-      setBlobDeleted(!blobDeleted)
-    }
-  
-    const handleButtonClick = (): void => {
-      setShowPopup(true);
-    };
-  
-    const handleClosePopup = (): void => {
-      setShowPopup(false);
-    };
-
-    const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-      setSearchQuery(event.target.value);
-    };
-
-    const handlePressDelete = (id: string, collection: string, file: string, version_id: string, is_root_blob: string) => {
-       setFileName(file);
-       setCollection(collection);
-       setDocId(id);
-       setShowDeletionPopup(true)
-       setVersionId(version_id)
-       setIsRootBlob(is_root_blob)
-    }
-
-    const handlePressMovement = (id: string, collection: string, file: string, version_id: string) => {
-      setFileName(file);
-      setCollection(collection);
-      setDocId(id);
-      setShowFileMovementPopup(true)
-      setVersionId(version_id)
-   }
-
-   const handlePressBlobDelete = (id: string, collection: string, file: string, version_id: string, is_root_blob: string) => {
-    setFileName(file);
-    setCollection(collection);
-    setDocId(id);
-    setShowBlobDeletionPopup(true)
-    setVersionId(version_id)
-    setIsRootBlob(is_root_blob)
- }
-
-    const handleCloseDeletionPopup = (): void => {
-      setShowDeletionPopup(false);
-    }
-
-    const handleCloseFileMovementPopup = (): void => {
-      setShowFileMovementPopup(false);
-    }
-
-    const handleCloseBlobDeletePopup = (): void => {
-      setShowBlobDeletionPopup(false);
-    }
-
-  
-    useEffect(() => {
-      // console.log("Document");
-        fetch(`https://asknarelle-backend.azurewebsites.net/api/collections/${username}/${collectionName}/${domainName}`)
-        .then(response => {
-          if (response.status === 403) {
-            setAuthorised(false)
-          }
-          else if(response.status === 404){
-            setCoursePresent(false)
-          }
-          else if (response.status === 500){
-            throw new Error('Failed to fetch course domains');
-          }
-          else{
-            return response.json();
-          }
-        })
-        .then((documents: Document[]) => {
-          setMessage(documents);
-        })
-        .catch(error => {
-          console.error('Error fetching collections:', error);
-        });
-    }, [fileCreated, fileDeleted, collectionName, blobDeleted, fileMoved, domainName, username]); 
-
-    const filteredFiles = message?.filter(document =>
-      document?.name?.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  
-  
-    return (
-      <main className="flex h-screen mt-[8vh] lg:mt-[0vh] flex-col p-10 sm:p-24 bg-gray-100">
-        <div className="flex flex-row justify-between">
-          {
-            authorised && coursePresent &&
-          
-        <div className="font-semibold relative w-10 text-xl font-nunito">
-          {collectionName}
-          <div className="absolute left-2 w-full h-1 bg-[#3C456C]"></div>
-        </div>
-}
-         <div>
-          {authorised && coursePresent && message?.length > 0 &&  <button onClick={handleButtonClick} className="bg-[#2C3463] text-white py-2 px-4 rounded-lg font-normal transition-transform duration-300 ease-in-out transform hover:scale-105 hover:bg-[#3C456C] font-nunito">Add New File</button>}
-         </div>
-        </div>
-        {
-          coursePresent ? (
-            authorised ? (
-        message?.length > 0 ? (
-          <>
-           <div className='flex items-center justify-center mt-5 sm:mt-0'>
-           <div className="relative">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={handleSearchChange}
-              placeholder="Search for Files"
-              className="border border-gray-300 rounded-lg py-2 pl-10 pr-4 mr-2 w-full font-nunito"
-            />
-            <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
-              <CiSearch size={20} />
-            </div>
-          </div>
-        </div> 
-           <FilesTable files={filteredFiles} collectionName={collectionName} onFileDeleted={handlePressDelete} onFileMoved={handlePressMovement} onBlobDeleted={handlePressBlobDelete}/>
-        </>
-      ) : (
-        <div className="flex h-screen flex-col items-center justify-center">
-          <div className="flex flex-col bg-white sm:w-4/5 w-full border border-dotted border-[#3F50AD] p-4 mx-auto rounded-lg items-center">
-            <AiOutlineFileAdd size={50} color="#2C3463" />
-            <p className="font-semibold text-lg mt-2 font-nunito">Upload the materials</p>
-            <button
-              onClick={handleButtonClick}
-              className="bg-[#2C3463] text-white py-2 px-4 rounded-lg font-normal mt-5 sm:w-2/5 w-full  transition-transform duration-300 ease-in-out transform hover:scale-105 hover:bg-[#3C456C] font-nunito"
-            >
-              Add New Files
-            </button>
-          </div>
-        </div>
-      )) : (
-        <ForbiddenPage/>
-      )) : (
-        <NotFoundPage/>
-      )}
-        {showPopup && <DocumentPopup onClose={handleClosePopup} onFileCreated={handleFileCreated} collectionName = {collectionName} domainName={domainName} username={username}/>}
-        {showDeletionPopup && <FileDeletionPopup fileName={fileName} collectionName={collection} id={docId} onFileDeleted={handleFileDeleted} onClose={handleCloseDeletionPopup} domainName={domainName} version_id={versionId} is_root_blob={isRootBlob} username={username}/>}
-        {showFileMovementPopup && <FileMovementPopup fileName={fileName} collectionName={collection} id={docId} onFileMoved={handleFileMoved} onClose={handleCloseFileMovementPopup} domainName={domainName} version_id={versionId} username={username}/>}
-        {showBlobDeletionPopup && <BlobDeletionPopup fileName={fileName} onBlobDeleted={handleBlobDeleted} id={docId} collectionName={collection} onClose={handleCloseBlobDeletePopup} domainName={domainName} version_id={versionId} is_root_blob={isRootBlob} username={username}/>}
-      </main>
-    );
-};
-
-const AuthenticatedFilesList= withAuth(Fileslist);
-
-export default function FilePage({params}: {params: {domain: string, course: string}}): JSX.Element {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
-      <AuthenticatedFilesList params={params}/>
+    <main className="min-h-screen bg-gray-100 pt-12 md:pt-16">
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:py-12">
+        {/* Header row */}
+        <Flex justify="space-between" align="center" wrap>
+          <Title level={3} style={{ margin: 0 }}>
+            {collectionName}
+          </Title>
+
+          {documents.length > 0 && (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={openUploadModal}
+            >
+              Add New File
+            </Button>
+          )}
+        </Flex>
+
+        {/* Search */}
+        {documents.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search for files"
+              prefix={<SearchOutlined />}
+              allowClear
+              size="middle"
+            />
+          </div>
+        )}
+
+        {/* Content */}
+        <div style={{ marginTop: 16 }}>
+          {loading ? (
+            <Flex align="center" justify="center" style={{ minHeight: 240 }}>
+              <Spin size="large" />
+            </Flex>
+          ) : documents.length > 0 ? (
+            <FilesTable
+              files={filteredFiles}
+              collectionName={collectionName}
+              onFileDeleted={handlePressDelete}
+              onFileMoved={handlePressMovement}
+              onBlobDeleted={handlePressBlobDelete}
+            />
+          ) : (
+            <div className="flex items-center justify-center">
+              <div className="bg-white w-full sm:w-4/5 border border-dashed border-[#3F50AD] p-6 rounded-lg text-center">
+                <FolderOpenOutlined style={{ fontSize: 36, color: "#2C3463" }} />
+                <Space direction="vertical" style={{ width: "100%" }} size="small">
+                  <Text strong style={{ fontSize: 16 }}>
+                    Upload the materials
+                  </Text>
+                  <Button
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    onClick={openUploadModal}
+                  >
+                    Add New Files
+                  </Button>
+                </Space>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Modals / Popups */}
+      {showUploadModal && (
+        <DocumentPopup
+          onClose={closeUploadModal}
+          onFileCreated={onFileCreated}
+          collectionName={collectionName}
+          domainName={domainName}
+          username={username}
+        />
+      )}
+
+      {showDeletionPopup && (
+        <FileDeletionPopup
+          fileName={selectedFileName}
+          collectionName={selectedCollection}
+          id={selectedDocId}
+          onFileDeleted={() => {
+            onFileDeleted();
+            closeDeletionPopup();
+          }}
+          onClose={closeDeletionPopup}
+          domainName={domainName}
+          version_id={selectedVersionId}
+          is_root_blob={selectedIsRootBlob}
+          username={username}
+        />
+      )}
+
+      {showMovementPopup && (
+        <FileMovementPopup
+          fileName={selectedFileName}
+          collectionName={selectedCollection}
+          id={selectedDocId}
+          onFileMoved={() => {
+            onFileMoved();
+            closeMovementPopup();
+          }}
+          onClose={closeMovementPopup}
+          domainName={domainName}
+          version_id={selectedVersionId}
+          username={username}
+        />
+      )}
+
+      {showBlobDeletionPopup && (
+        <BlobDeletionPopup
+          fileName={selectedFileName}
+          onBlobDeleted={() => {
+            onBlobDeleted();
+            closeBlobDeletionPopup();
+          }}
+          id={selectedDocId}
+          collectionName={selectedCollection}
+          onClose={closeBlobDeletionPopup}
+          domainName={domainName}
+          version_id={selectedVersionId}
+          is_root_blob={selectedIsRootBlob}
+          username={username}
+        />
+      )}
+    </main>
+  );
+}
+
+const AuthenticatedFilesList = withAuth(Fileslist);
+
+export default function FilePage({
+  params,
+}: {
+  params: { domain: string; course: string };
+}): JSX.Element {
+  return (
+    <Suspense fallback={<Spin style={{ margin: 24 }} />}>
+      <AuthenticatedFilesList params={params} />
     </Suspense>
   );
 }

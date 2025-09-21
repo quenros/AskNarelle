@@ -13,6 +13,11 @@ import uuid
 from azure.storage.blob import BlobServiceClient
 from langchain.docstore.document import Document
 from common_helper import read_docx, read_pdf, read_pptx, read_txt
+from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
+
+import chromadb
+from chromadb.config import Settings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
 load_dotenv()
 
@@ -20,16 +25,16 @@ blob_service_client = BlobServiceClient.from_connection_string(os.environ.get('A
 connection_string = os.environ.get('AZURE_CONN_STRING')
 
 embeddings = AzureOpenAIEmbeddings(
-            azure_deployment="Ask-Narelle-Embeddings", 
-            api_key=os.environ.get('OPENAI_API_KEY'),
-            azure_endpoint=os.environ.get('AZURE_ENDPOINT'),
+            azure_deployment="text-embedding-ada-002", 
+            api_key=os.environ.get('AZURE_OPENAI_API_KEY'),
+            azure_endpoint=os.environ.get('AZURE_OPENAI_ENDPOINT'),
             model='text-embedding-ada-002'
         )
 
 sample_text = "Embeddings dimension finder"
 embedding_vector = embeddings.embed_query(sample_text)
 
-embedding_dimension = len(embedding_vector)
+embedding_dimenison = len(embedding_vector)
 
 
 # def storeDocuments(containername, chunksize, overlap):
@@ -97,13 +102,43 @@ embedding_dimension = len(embedding_vector)
 #         print(f"An error occurred: {e}")
 #         return e
 
+def ensure_index(index_name: str, endpoint: str, key: str, vector_dim: int):
+    index_client = SearchIndexClient(endpoint, AzureKeyCredential(key))
+    try:
+        index_client.get_index(index_name)
+        return  # exists
+    except ResourceNotFoundError:
+        pass
+
+    fields = [
+        SimpleField(name="id", type=SearchFieldDataType.String, key=True, searchable=True, filterable=True, retrievable=True),
+        SearchableField(name="content", type=SearchFieldDataType.String, searchable=True, retrievable=True),
+        SearchField(
+            name="content_vector",
+            type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
+            searchable=True,
+            vector_search_dimensions=vector_dim,
+            vector_search_profile_name="my-vector-config",
+        ),
+        SearchableField(name="filename", type=SearchFieldDataType.String, filterable=True, sortable=True),
+    ]
+    vector_search = VectorSearch(
+        profiles=[VectorSearchProfile(name="my-vector-config", algorithm_configuration_name="my-algorithms-config")],
+        algorithms=[HnswAlgorithmConfiguration(name="my-algorithms-config")],
+    )
+    index = SearchIndex(name=index_name, fields=fields, vector_search=vector_search)
+    index_client.create_or_update_index(index=index)
+
 def storeDocuments(containername, chunksize, overlap):
     try:
-        search_client = SearchClient(
-            endpoint=os.environ.get('AZURE_COGNITIVE_SEARCH_ENDPOINT'), 
-            index_name=containername, 
-            credential=AzureKeyCredential(os.environ.get('AZURE_COGNITIVE_SEARCH_API_KEY'))
-        )
+        endpoint = os.environ.get('AZURE_COGNITIVE_SEARCH_ENDPOINT')
+        key = os.environ.get('AZURE_COGNITIVE_SEARCH_API_KEY')
+
+        # Ensure index exists (auto-create if missing)
+        ensure_index(containername, endpoint, key, embedding_dimenison)
+
+        search_client = SearchClient(endpoint=endpoint, index_name=containername, credential=AzureKeyCredential(key))
+
         loader = AzureBlobStorageContainerLoader(
             conn_str=os.environ.get('AZURE_CONN_STRING'),
             container=containername,
@@ -112,84 +147,66 @@ def storeDocuments(containername, chunksize, overlap):
         text_splitter = CharacterTextSplitter(chunk_size=chunksize, chunk_overlap=overlap)
         documents = loader.load()
 
-        docs_to_add_final = []
-        docs_to_update_final = []
-        docs_to_delete_final = []
+        docs_to_add_final, docs_to_update_final, docs_to_delete_final = [], [], []
 
         for doc in documents:
             split_docs = text_splitter.split_documents([doc])
             filename = Path(doc.metadata['source']).name
-            search_results = list(search_client.search(filter=f"filename eq '{filename}'"))
+
+            search_results = list(search_client.search(search_text="*", filter=f"filename eq '{filename}'"))
 
             if search_results:
-                print("update!")
-                docs_to_update_id = [result['id'] for result in search_results]
-                docs_to_update_page_content = [result['content'] for result in search_results]
-                docs_to_update_embeddings = embeddings.embed_documents(docs_to_update_page_content)
-
-                new_chunks = len(split_docs)
+                docs_to_update_id = [r['id'] for r in search_results]
                 existing_chunks = len(docs_to_update_id)
+                new_chunks = len(split_docs)
 
-                # Update matching chunks
+                new_embeddings = embeddings.embed_documents([s.page_content for s in split_docs])
+
                 for i in range(min(existing_chunks, new_chunks)):
                     docs_to_update_final.append({
                         'id': docs_to_update_id[i],
                         'content': split_docs[i].page_content,
-                        'content_vector': docs_to_update_embeddings[i],
+                        'content_vector': new_embeddings[i],
                         'filename': filename
                     })
 
-                # Add new chunks if there are more in the new document
                 if new_chunks > existing_chunks:
-                    print("Adding new chunks...")
-                    extra_docs = split_docs[existing_chunks:]
-                    extra_embeddings = embeddings.embed_documents(
-                        [sdoc.page_content for sdoc in extra_docs]
-                    )
-                    for i, sdoc in enumerate(extra_docs):
+                    extras = split_docs[existing_chunks:]
+                    extra_vecs = embeddings.embed_documents([s.page_content for s in extras])
+                    for i, sdoc in enumerate(extras):
                         docs_to_add_final.append({
                             'id': str(uuid.uuid4()),
                             'content': sdoc.page_content,
-                            'content_vector': extra_embeddings[i],
+                            'content_vector': extra_vecs[i],
                             'filename': filename
                         })
-
-                # Remove extra chunks if the new document has fewer
                 elif new_chunks < existing_chunks:
-                    print("Removing excess chunks...")
-                    excess_ids = docs_to_update_id[new_chunks:]
-                    for excess_id in excess_ids:
-                       docs_to_delete_final.append({'id': excess_id})
-
+                    for ex_id in docs_to_update_id[new_chunks:]:
+                        docs_to_delete_final.append({'id': ex_id})
             else:
-                print("add!")
-                docs_to_add_page_content = [sdoc.page_content for sdoc in split_docs]
-                docs_to_add_embeddings = embeddings.embed_documents(docs_to_add_page_content)
-
+                texts = [s.page_content for s in split_docs]
+                vecs = embeddings.embed_documents(texts)
                 for i, sdoc in enumerate(split_docs):
                     docs_to_add_final.append({
                         'id': str(uuid.uuid4()),
                         'content': sdoc.page_content,
-                        'content_vector': docs_to_add_embeddings[i],
+                        'content_vector': vecs[i],
                         'filename': filename
                     })
 
         if docs_to_update_final:
             search_client.merge_documents(docs_to_update_final)
-
         if docs_to_add_final:
             search_client.upload_documents(docs_to_add_final)
-
         if docs_to_delete_final:
-            print(docs_to_delete_final)
             search_client.delete_documents(docs_to_delete_final)
 
         return "True"
 
+    except (ResourceNotFoundError, HttpResponseError) as e:
+        return f"Search error: {e}"
     except Exception as e:
-        print(f"An error occurred: {e}")
-        return e
-
+        return f"{type(e).__name__}: {e}"
 
 # def moveToVectorStoreFunction(containername, domainname, versionid, chunksize, overlap, filename):
 #     try:
@@ -366,9 +383,11 @@ def moveToVectorStoreFunction(containername, domainname, versionid, chunksize, o
 
 
     
-def  createIndexFucntion(collection_name):
+def  createIndexFunction(collection_name):
     try:
         client = SearchIndexClient(os.environ.get('AZURE_COGNITIVE_SEARCH_ENDPOINT'), AzureKeyCredential(os.environ.get('AZURE_COGNITIVE_SEARCH_API_KEY')))
+
+        print(client)
 
         fields = [
         SimpleField(
@@ -396,7 +415,7 @@ def  createIndexFucntion(collection_name):
             name="content_vector", #content_vector
             type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
             searchable=True, 
-            vector_search_dimensions=embedding_dimension, 
+            vector_search_dimensions= embedding_dimenison, 
             vector_search_profile_name="my-vector-config"),
 
         SearchableField(

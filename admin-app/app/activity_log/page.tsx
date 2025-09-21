@@ -52,7 +52,7 @@ function ActivityLog(): JSX.Element {
   };
 
   useEffect(() => {
-    fetch(`https://asknarelle-backend.azurewebsites.net/activities/${username}/viewactivities`)
+    fetch(`http://localhost:5000/activities/${username}/viewactivities`)
       .then(response => {
         if (response.status === 403) {
           setAuthorised(false);

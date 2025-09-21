@@ -1,136 +1,108 @@
-import React from 'react';
-import { useState } from 'react';
-import { IoIosCloseCircleOutline } from "react-icons/io";
-import { Oval } from 'react-loader-spinner';
-import { PublicClientApplication} from "@azure/msal-browser";
-import { msalConfig } from "@/authConfig";
-
+import React, { useState } from 'react';
+import { Modal, Form, Input, Button, Typography, message, Spin } from 'antd';
+import { PublicClientApplication } from '@azure/msal-browser';
+import { msalConfig } from '@/authConfig';
 
 interface PopupProps {
   onClose: () => void;
   onDomainCreated: () => void;
-  collectionName: string
-  
+  collectionName: string;
 }
 
 export const msalInstance = new PublicClientApplication(msalConfig);
 
-const DomainPopup: React.FC<PopupProps> = ({ onClose, onDomainCreated, collectionName}) => {
-  const [inputValue, setInputValue] = useState('');
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [errorMessage, setErrorMessage] = useState<string>('');
+const DomainPopup: React.FC<PopupProps> = ({ onClose, onDomainCreated, collectionName }) => {
+  const [form] = Form.useForm();
+  const [isLoading, setIsLoading] = useState(false);
   const accounts = msalInstance.getAllAccounts();
-  const username = accounts[0].username;
+  const username = accounts?.[0]?.username ?? '';
 
+  const handleSubmit = async () => {
+    try {
+      const { domainName } = await form.validateFields();
+      setIsLoading(true);
 
- 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    
-    // Regular expression to allow only lowercase letters and numbers
-    const regex = /^[a-z0-9]*$/;
+      const resp = await fetch('http://localhost:5000/api/createdomain', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          domainName,
+          courseName: collectionName,
+          user: username,
+          action: 'Domain Creation',
+        }),
+      });
 
-    // If the input is valid, update the input value and clear the error message
-    if (regex.test(value)) {
-      setInputValue(value);
-      setErrorMessage('');
-    } else {
-      // Show error message for invalid input
-      setErrorMessage('Input can only contain lowercase letters and numbers.');
+      if (resp.ok) {
+        message.success('Domain created successfully');
+        onDomainCreated();
+        onClose();
+      } else if (resp.status === 400) {
+        const data = await resp.json().catch(() => ({}));
+        const err =
+          typeof data?.message === 'string'
+            ? data.message
+            : 'Failed to create domain';
+        message.error(err);
+      } else {
+        message.error('Failed to create domain');
+      }
+    } catch (err: any) {
+      // ignore form validation errors
+      if (!err?.errorFields) {
+        message.error(err?.message ?? 'Unknown error');
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
-
-  const handleSubmit = () => {
-    setIsLoading(true)
-    fetch('https://asknarelle-backend.azurewebsites.net/api/createdomain', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ domainName: inputValue, courseName: collectionName, user: username, action: "Domain Creation"}),
-    })
-    .then(response => {
-      if (response.ok) {
-        console.log('Domain created successfully');
-        onClose();
-        onDomainCreated(); 
-      } 
-      else if(response.status === 400){
-        return response.json().then(data => {
-          setErrorMessage(data.message); // Use the message from the response
-        });
-      }
-      else {
-        throw new Error('Failed to create domain');
-      }
-    })
-    .catch(error => {
-      console.error('Error creating domain:', error);
-    })
-    .finally(() => {
-      setIsLoading(false);
-     // Close the popup regardless of success or failure
-    });
-  };
-  
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-gray-800 bg-opacity-50 z-50">
-      <div className="bg-white p-8 rounded-lg shadow-md relative sm:w-2/6 w-5/6">
-        { !isLoading && (
-           <button
-           onClick={onClose}
-           className="absolute top-0 right-0 p-2"
-         >
-          <IoIosCloseCircleOutline color='#FF0E0E' size={30}/>
-         </button>
+    <Modal
+      title="Create Category"
+      open
+      onCancel={isLoading ? undefined : onClose}
+      footer={
+        <Button type="primary" onClick={handleSubmit} loading={isLoading}>
+          Submit
+        </Button>
+      }
+      maskClosable={!isLoading}
+      closable={!isLoading}
+      destroyOnClose
+    >
+      <Typography.Paragraph>
+        Create a new category for <b>{collectionName}</b>.
+      </Typography.Paragraph>
 
-        )
-        }
-        {isLoading && (
-          <>
-            <div className="flex justify-center mb-4">
-              <Oval
-                height={40}
-                width={40}
-                color="#2c4787"
-                visible={true}
-                ariaLabel='oval-loading'
-                secondaryColor="#2c4787"
-                strokeWidth={2}
-                strokeWidthSecondary={2}
-              />
-            </div>
-            <p className="text-[#1a2d58] text-center mb-4 font-semibold">Creating</p>
-          </>
-        )}
-        {
-          !isLoading && (
-            <>
-            <label htmlFor="courseName" className="block mb-2 text-gray-800 font-semibold">Category Name</label>
-            <input
-              type="text"
-              value={inputValue}
-              onChange={handleInputChange}
-              className="border border-gray-300 rounded-md px-4 py-2 mb-4 w-full"
-              placeholder="Enter your input"
-            />
-             {errorMessage !== ''  && (
-              <p className="text-red-500 text-sm mb-4 font-nunito">{errorMessage}</p>
-            )}
-            <button
-              onClick={handleSubmit}
-              className="bg-[#2C3463] text-white font-bold py-2 px-4 rounded transition-transform duration-300 ease-in-out transform hover:scale-105 hover:bg-[#3C456C]"
-            >
-              Submit
-            </button>
-            </>
+      <Form form={form} layout="vertical" requiredMark={false}>
+        <Form.Item
+          label="Category Name"
+          name="domainName"
+          normalize={(v) => (typeof v === 'string' ? v.trim() : v)}
+          rules={[
+            { required: true, message: 'Please enter a category name.' },
+            {
+              pattern: /^[a-z0-9]+$/,
+              message: 'Only lowercase letters and numbers are allowed.',
+            },
+          ]}
+        >
+          <Input
+            placeholder="e.g. machinelearning101"
+            disabled={isLoading}
+            allowClear
+          />
+        </Form.Item>
+      </Form>
 
-          )
-        }
-
-      </div>
-    </div>
+      {isLoading && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Spin />
+          <Typography.Text>Creating…</Typography.Text>
+        </div>
+      )}
+    </Modal>
   );
 };
 

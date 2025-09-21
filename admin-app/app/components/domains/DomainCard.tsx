@@ -18,7 +18,7 @@ const DomainCard: React.FC<CourseProps> = ({courseName, domainName, onDomainDele
   const[totalFiles, setTotalFiles] = useState<number>(0); 
 
   useEffect(() => {
-    fetch(`https://asknarelle-backend.azurewebsites.net/api/${courseName}/${domainName}/totalFiles`)
+    fetch(`http://localhost:5000/api/${courseName}/${domainName}/totalFiles`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Failed to fetch collections');

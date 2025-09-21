@@ -1,10 +1,17 @@
-import React from 'react';
-import { useState, ChangeEvent, FormEvent, useEffect } from 'react';
-import { IoIosCloseCircleOutline } from "react-icons/io";
-import { Oval } from 'react-loader-spinner';
-import { FaFileAlt } from 'react-icons/fa';
-import Slider from 'rc-slider';
-import 'rc-slider/assets/index.css';
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  Modal,
+  Upload,
+  Button,
+  Typography,
+  Space,
+  Steps,
+  Switch,
+  Slider,
+  message,
+} from "antd";
+import type { UploadFile } from "antd/es/upload/interface";
+import { InboxOutlined } from "@ant-design/icons";
 
 interface PopupProps {
   onClose: () => void;
@@ -14,333 +21,237 @@ interface PopupProps {
   username: string;
 }
 
-interface AiSearchCredential{
-   endpoint: string;
-   api: string
-}
+const { Dragger } = Upload;
+const { Text } = Typography;
 
-const DocumentPopup: React.FC<PopupProps> = ({ onClose, onFileCreated, collectionName, domainName, username}) => {
-  // const [inputValue, setInputValue] = useState('');
-  const [files, setFiles] = useState<FileList | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const[showSliders, setShowSliders] = useState<boolean>(false);
-  const[tick, setTick] = useState<boolean>(false);
-  const[chunkSize, setChunkSize] = useState<number>(1000);
-  const[overlap, setOverlap] = useState<number>(100);
-  const[progress, setProgress] = useState<string>('');
-  const[inValid, setIsInValid] = useState<boolean>(false);
-  const[uploadSuccess, setUploadSuccess] = useState<boolean>(false);
+const DOC_EXTS = [".pdf", ".docx", ".pptx", ".txt"];
+const VIDEO_EXTS = [".mp4", ".mov", ".mkv", ".webm", ".avi"];
+const ACCEPT = [
+  ...DOC_EXTS,
+  ...VIDEO_EXTS,
+].join(",");
 
+const isDoc = (name?: string) =>
+  !!name && DOC_EXTS.some((ext) => name.toLowerCase().endsWith(ext));
+const isVideo = (name?: string) =>
+  !!name && VIDEO_EXTS.some((ext) => name.toLowerCase().endsWith(ext));
 
+const DocumentPopup: React.FC<PopupProps> = ({
+  onClose,
+  onFileCreated,
+  collectionName,
+  domainName,
+  username,
+}) => {
+  const [open] = useState(true);
+  const [fileList, setFileList] = useState<UploadFile[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  // const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-  //   setInputValue(e.target.value);
-  // };
+  // optional “advanced” chunking
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [chunkSize, setChunkSize] = useState(1000);
+  const [overlap, setOverlap] = useState(100);
 
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setFiles(e.target.files);
-    }
+  // progress stepper
+  // 0=Select, 1=Upload to Blob, 2=Vector store, 3=Database
+  const [step, setStep] = useState(0);
+
+  const docFiles = useMemo(
+    () => fileList.filter((f) => isDoc(f.name)),
+    [fileList]
+  );
+  const videoFiles = useMemo(
+    () => fileList.filter((f) => isVideo(f.name)),
+    [fileList]
+  );
+  const hasDocs = docFiles.length > 0;
+  const hasVideos = videoFiles.length > 0;
+
+  const beforeUpload = () => false; // prevent auto-upload; we upload manually
+  const onRemove = (f: UploadFile) => {
+    setFileList((prev) => prev.filter((x) => x.uid !== f.uid));
+    return true;
   };
 
-  const triggerFileInput = () => {
-    const fileInput = document.getElementById('fileInput') as HTMLInputElement;
-    if (fileInput) {
-      fileInput.click();
+  const doFetch = async (url: string, init: RequestInit) => {
+    const resp = await fetch(url, init);
+    if (!resp.ok) {
+      let err = await resp.text().catch(() => "");
+      try {
+        const j = JSON.parse(err);
+        err = j?.message || j?.error || err;
+      } catch {}
+      throw new Error(err || `${resp.status} ${resp.statusText}`);
     }
+    return resp;
   };
 
-  const handleCheckboxChange = (e: ChangeEvent<HTMLInputElement>)=> {
-    setTick(e.target.checked);
-    setShowSliders(e.target.checked);
-    
-  }
-
-
-  const handleChunkSliderChange = (value: number | number[]) => {
-    if (typeof value === 'number') {
-        setChunkSize(value)
-    }
+  const buildFormData = () => {
+    const fd = new FormData();
+    fileList.forEach((f) => {
+      if (f.originFileObj) fd.append("files", f.originFileObj);
+    });
+    return fd;
   };
 
-  const handleOverlapSliderChange = (value: number | number[]) => {
-    if(typeof value === 'number'){
-      setOverlap(value)
-    }
-  }
-
- 
-
-  const handleSubmit = async (e:FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true)
-    if (!files) {
-      alert('Please upload the course materials');
-      setIsLoading(false)
+  const handleSubmit = async () => {
+    if (fileList.length === 0) {
+      message.warning("Please select at least one file.");
       return;
     }
-  
-    const formData = new FormData();
-    Array.from(files).forEach((file) => formData.append('files', file));
-    // formData.append('chunkSize', chunkSize.toString())
-    // formData.append('overlap', overlap.toString())
-    setProgress('Uploading To File Storage')
-    fetch(`https://asknarelle-backend.azurewebsites.net/api/${collectionName}/${domainName}/${username}/createblob`, {
-          method: 'PUT',
-           body: formData
-      })
-    .then(blobResponse => {
-        if (blobResponse.ok) {
-          setProgress('Uploading To Vector Store')
-          return fetch('https://asknarelle-backend.azurewebsites.net/vectorstore', {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ 
-              containername: collectionName,
-              chunksize: chunkSize,
-              overlap: overlap,
-             })
-          })
-          .then(vectorResponse => {
-            if (vectorResponse.ok) {
-              setProgress('Uploading To database')
-              return fetch(`https://asknarelle-backend.azurewebsites.net/api/${collectionName}/${domainName}/${username}/createdocument`, {
-                method: 'PUT',
-                body: formData
-              })
-              .then(dbResponse => {
-                if(dbResponse.ok){
-                  console.log("Document uploded successfully into the database")
-                  setUploadSuccess(true)
+    setLoading(true);
+    setStep(1);
 
-                }
-                else{
-                  const errorMessage = vectorResponse.text().then(message => {console.log(message)});
-                  alert(`Internal Server Error: ${vectorResponse.statusText}, Details: ${errorMessage}`);
-                  throw new Error(`Failed to load into vector store: ${errorMessage}`);      
-                }
-              })
+    try {
+      // 1) Upload to Blob
+      const formData = buildFormData();
+      await doFetch(
+        `http://localhost:5000/api/${collectionName}/${domainName}/${username}/createblob`,
+        { method: "PUT", body: formData }
+      );
 
-            }
-            else{
-              throw new Error('Failed to load data into vector store');
-            } 
-           
-          })
-        } 
-        else if (blobResponse.status === 400) {
-          setIsInValid(true);
-        }
-        else {
-          throw new Error('Failed to create document');
-        }
-      })
-    .finally(() => {
-      setIsLoading(false);
-      onFileCreated(); 
-    });
+      // 2) Only vectorize *documents* (skip videos)
+      if (hasDocs) {
+        setStep(2);
+        console.log(collectionName)
+        console.log(chunkSize)
+        console.log(overlap)
+        await doFetch("http://localhost:5000/vectorstore", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            containername: collectionName,
+            chunksize: chunkSize,
+            overlap: overlap,
+          }),
+        });
+      }
+
+      // 3) Create DB records (for both docs & videos)
+      setStep(3);
+      await doFetch(
+        `http://localhost:5000/api/${collectionName}/${domainName}/${username}/createdocument`,
+        { method: "PUT", body: buildFormData() }
+      );
+
+      message.success("Files uploaded successfully");
+      onFileCreated();
+      onClose();
+    } catch (err: any) {
+      message.error(err?.message || "Upload failed");
+    } finally {
+      setLoading(false);
+      setStep(0);
+    }
   };
 
-  useEffect(() => {
-    if (uploadSuccess) {
-      onClose();
-    }
-  }, [uploadSuccess, onClose]);
-  
-  
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-gray-800 bg-opacity-50 z-50">
-      <div className="bg-white p-8 rounded-lg shadow-md relative sm:w-2/6 w-5/6">
-        {
-          !isLoading && (
-            <button
-            onClick={onClose}
-            className="absolute top-0 right-0 p-2"
-          >
-           <IoIosCloseCircleOutline color='#FF0E0E' size={30}/>
-          </button>
+    <Modal
+      title="Add files"
+      open={open}
+      onCancel={loading ? undefined : onClose}
+      footer={[
+        <Button key="cancel" onClick={onClose} disabled={loading}>
+          Cancel
+        </Button>,
+        <Button
+          key="submit"
+          type="primary"
+          onClick={handleSubmit}
+          loading={loading}
+        >
+          Upload
+        </Button>,
+      ]}
+      maskClosable={!loading}
+      closable={!loading}
+      destroyOnClose
+    >
+      <Space direction="vertical" style={{ width: "100%" }} size="middle">
+        <Steps
+          current={step}
+          size="small"
+          items={[
+            { title: "Select" },
+            { title: "Blob" },
+            { title: "Vector" },
+            { title: "Database" },
+          ]}
+        />
 
-          )
-        }
-        {isLoading && (
-          <>
-            <div className="flex justify-center mb-4">
-              <Oval
-                height={40}
-                width={40}
-                color="#2c4787"
-                visible={true}
-                ariaLabel='oval-loading'
-                secondaryColor="#2c4787"
-                strokeWidth={2}
-                strokeWidthSecondary={2}
+        <Dragger
+          multiple
+          fileList={fileList}
+          onChange={({ fileList }) => setFileList(fileList)}
+          beforeUpload={beforeUpload}
+          onRemove={onRemove}
+          accept={ACCEPT}
+          disabled={loading}
+        >
+          <p className="ant-upload-drag-icon">
+            <InboxOutlined />
+          </p>
+          <p className="ant-upload-text">
+            Click or drag files to this area to upload
+          </p>
+          <p className="ant-upload-hint">
+            Allowed: PDF, DOCX, PPTX, TXT, and videos (MP4, MOV, MKV, WEBM,
+            AVI). Videos are stored but not vectorized.
+          </p>
+        </Dragger>
+
+        <Space direction="vertical" style={{ width: "100%" }}>
+          <Text type="secondary">
+            {hasDocs
+              ? `Will vectorize ${docFiles.length} document(s).`
+              : "No documents selected for vectorization."}
+          </Text>
+          {hasVideos && (
+            <Text type="secondary">
+              {videoFiles.length} video file(s) will be uploaded to storage and
+              listed, but skipped for embeddings.
+            </Text>
+          )}
+        </Space>
+
+        <Space align="center" style={{ width: "100%" }}>
+          <Switch
+            checked={showAdvanced}
+            onChange={setShowAdvanced}
+            disabled={loading}
+          />
+          <Text>Advanced chunk settings</Text>
+        </Space>
+
+        {showAdvanced && (
+          <Space direction="vertical" style={{ width: "100%" }}>
+            <div>
+              <Text strong>Chunk size</Text>
+              <Slider
+                min={500}
+                max={2000}
+                step={50}
+                value={chunkSize}
+                onChange={(v) => setChunkSize(v as number)}
+                tooltip={{ open: true }}
               />
             </div>
-            <p className="text-[#1a2d58] text-center mb-4 font-semibold">{progress}</p>
-          </>
-        )}
-        {
-          !isLoading && (
-            <>
-        <label htmlFor="fileInput" className="block mb-2 text-gray-800 font-semibold">Select Files</label>
-        {
-          inValid && (
-            <p className='text-red-500'> Unsupported file format</p>
-          )
-        }
-        <input
-          type="file"
-          id="fileInput"
-          multiple
-          onChange={handleFileChange}
-          className="hidden"
-        />
-        <div className='flex'>
-            <button
-              type="button"
-              className="px-4 py-2 bg-[#1a2d58] text-white rounded-md mr-5 transition-transform duration-300 ease-in-out transform hover:scale-105 hover:bg-[#3C456C] mb-4"
-              onClick={triggerFileInput}
-            >
-              Choose Files (.docx, .pdf, .pptx, .txt)
-            </button>
-            {files && (
-              <div className="mt-2">
-                <FaFileAlt className="text-[#1a2d58] mr-2" />     
-              </div>
-            )}
-        </div>
-       
-          {/* <label htmlFor="checkbox" className="text-gray-800 font-semibold mr-2 mt-4">Change default chunk size and overlap</label>
-          <input
-            type="checkbox"
-            id="checkbox"
-            checked={tick}
-            onChange={handleCheckboxChange}
-          />
-          <p className='text-red-500'> The default chunk size is set to 1000 and overlap is 100</p> */}
-{/* 
-            {
-              showSliders && (
-                <>
-                <div className="mb-4">
-                <label className="block text-[#1a2d58] font-bold mb-2">
-                  Chunk Size
-                </label>
-                <Slider
-                  min={1000}
-                  max={2000}
-                  step={1}
-                  value={chunkSize}
-                  onChange={handleChunkSliderChange}
-                  trackStyle={{ backgroundColor: '#1a2d58' }}
-                  handleStyle={{ borderColor: '#1a2d58' }}
-                />
-                <div className="text-center text-[#1a2d58] font-semibold mt-2">
-                  {chunkSize}
-                </div>
-              </div>
-               <div className="mb-4">
-               <label className="block text-[#1a2d58] font-bold mb-2">
-                 Overlap
-               </label>
-               <Slider
-                 min={100}
-                 max={1000}
-                 step={1}
-                 value={overlap}
-                 onChange={handleOverlapSliderChange}
-                 trackStyle={{ backgroundColor: '#1a2d58' }}
-                 handleStyle={{ borderColor: '#1a2d58' }}
-               />
-               <div className="text-center text-[#1a2d58] font-semibold mt-2">
-                 {overlap}
-               </div>
-             </div>
-             </>
-              )
-            } */}
             <div>
-            <button
-          onClick={handleSubmit}
-          className="bg-[#2C3463] text-white font-bold py-2 px-4 rounded mt-5 transition-transform duration-300 ease-in-out transform hover:scale-105 hover:bg-[#3C456C]"
-        >
-          Submit
-        </button>
-
+              <Text strong>Overlap</Text>
+              <Slider
+                min={0}
+                max={500}
+                step={10}
+                value={overlap}
+                onChange={(v) => setOverlap(v as number)}
+                tooltip={{ open: true }}
+              />
             </div>
-        </>
-
-          )
-        }
-       
-      </div>
-    </div>
+          </Space>
+        )}
+      </Space>
+    </Modal>
   );
 };
 
 export default DocumentPopup;
-
- // const handleSubmit = async (e: FormEvent) => {
-  //   e.preventDefault();
-  //   setIsLoading(true);
-  
-  //   if (!files) {
-  //     alert('Please upload the course materials');
-  //     setIsLoading(false);
-  //     return;
-  //   }
-  
-  //   const formData = new FormData();
-  //   Array.from(files).forEach((file) => formData.append('files', file));
-  
-  //   setProgress('Uploading To File Storage');
-  //   fetch(`https://asknarelle-backend.azurewebsites.net/api/${collectionName}/${domainName}/createdocument`, {
-  //       method: 'PUT',
-  //       body: formData,
-  //     })
-  //     .then(
-  //       response => {
-  //         if(response.ok){
-  //           setProgress('Uploading To Vector Store');
-  //           fetch('http://localhost:5000/vectorstore', {
-  //             method: 'PUT',
-  //             headers: {
-  //               'Content-Type': 'application/json',
-  //             },
-  //             body: JSON.stringify({
-  //               containername: collectionName,
-  //               chunksize: chunkSize,
-  //               overlap: overlap,
-  //           }),
-  //         })
-  //         .then(
-  //             flaskResponse => {
-  //               if (flaskResponse.ok) {  
-  //                 console.log('Data loaded into vectorstore successfully');
-  //                 setUploadSuccess(true);
-  //               } else {
-  //                 const flaskData = await flaskResponse.json(); 
-  //                 const flaskMessage = flaskData.message; // Await the error message
-  //                 alert(`Internal Server Error: ${flaskMessage}, Details: ${flaskMessage}`);
-  //                 throw new Error(`Failed to load into vector store: ${flaskMessage}`);
-  //               }
-  //             } 
-  //         )
-  //       }
-  //       else if(!response.ok) {
-  //         console.error('Failed to upload document');
-  //       }
-  //       else if (response.status === 400) {
-  //         setIsInValid(true);
-  //       } 
-  //     })
-  //     .catch(error => {
-  //       console.error('Error uploading document:', error);
-  //     })
-  //     .finally (() => {
-  //       setIsLoading(false);
-  //       onFileCreated();
-
-  //     })
