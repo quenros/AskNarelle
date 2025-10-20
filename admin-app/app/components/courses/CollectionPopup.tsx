@@ -1,10 +1,8 @@
 "use client";
 import React, { useState } from "react";
-import { AccountInfo, PublicClientApplication } from "@azure/msal-browser";
+import { PublicClientApplication } from "@azure/msal-browser";
 import { msalConfig } from "@/authConfig";
-
-// Ant Design
-import { Modal, Form, Input, Button, Typography, Spin, Alert } from "antd";
+import { Modal, Form, Input, Button, Spin, Alert } from "antd";
 
 interface PopupProps {
   onClose: () => void;
@@ -14,75 +12,88 @@ interface PopupProps {
 export const msalInstance = new PublicClientApplication(msalConfig);
 
 const Popup: React.FC<PopupProps> = ({ onClose, onCollectionCreated }) => {
-  const [inputValue, setInputValue] = useState("");
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [containerExsists, setContainerExsists] = useState<boolean>(false);
-  const [errorMessage, setErrorMessage] = useState<string>("");
+  const [courseCode, setCourseCode] = useState("");
+  const [courseName, setCourseName] = useState("");
+  const [description, setDescription] = useState("");
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [containerExists, setContainerExists] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const accounts = msalInstance.getAllAccounts();
   const username = accounts[0]?.username || "";
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    const regex = /^[a-z0-9]*$/; // lowercase letters & numbers only
-
+  const handleCourseCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.trim();
+    const regex = /^[a-z0-9-]*$/; // allows lowercase, digits, and hyphen (safe for container/index names)
     if (regex.test(value)) {
-      setInputValue(value);
+      setCourseCode(value);
       setErrorMessage("");
     } else {
-      setErrorMessage("Input can only contain lowercase letters and numbers.");
+      setErrorMessage("Course code can contain lowercase letters, numbers, and hyphens.");
     }
   };
 
   const handleSubmit = async () => {
     try {
       setIsLoading(true);
-      setContainerExsists(false);
+      setContainerExists(false);
+      setErrorMessage("");
 
-      // Step 1: create index
-      const indexResponse = await fetch("http://localhost:5000/createindex", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ collectionName: inputValue }),
-      });
-
-      if (!indexResponse.ok) {
-        setErrorMessage("Failed to create AI search index");
+      if (!courseCode) {
+        setErrorMessage("Course code is required.");
         return;
       }
 
-      // Step 2: create collection
-      const collectionResponse = await fetch(
-        "http://localhost:5000/api/createcollection",
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ collectionName: inputValue, username }),
-        }
-      );
+      // 1) Create Azure AI Search index (same as before)
+      
+        // const resp = await fetch("http://localhost:5000/createindex", {
+        //   method: "PUT",
+        //   headers: { "Content-Type": "application/json" },
+        //   body: JSON.stringify({ collectionName: courseCode }),
+        // });
+        // if (!resp.ok) {
+        //   setErrorMessage("Failed to create AI search index");
+        //   return;
+        // }
+      
 
-      if (!collectionResponse.ok) {
-        try {
-          const errorData = await collectionResponse.json();
-          if (errorData.error === "Container already exsists") {
-            setContainerExsists(true);
+      // 2) Create container + Cosmos course record via your new endpoint
+      
+        const res = await fetch("http://localhost:5000/vi/courses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            courseCode,
+            courseName,
+            description,
+            collectionName: courseCode,
+            username
+          }),
+        });
+
+        if (!res.ok) {
+          let payload: any = {};
+          try {
+            payload = await res.json();
+          } catch {}
+
+          if (res.status === 409 || payload?.error === "Container already exists") {
+            setContainerExists(true);
             setErrorMessage(
-              "This course code is already in the database. Try again with a different course code."
+              "This course code already exists. Try a different course code."
             );
           } else {
-            setErrorMessage("Failed to create course");
+            setErrorMessage(payload?.error || "Failed to create course");
           }
-        } catch {
-          setErrorMessage("Failed to create course");
+          return;
         }
-        return;
-      }
+      
 
-      // success
       onCollectionCreated();
       onClose();
-    } catch (error) {
-      console.error("Error occurred:", error);
+    } catch (err) {
+      console.error("Error occurred:", err);
       setErrorMessage("An unexpected error occurred. Please try again later.");
     } finally {
       setIsLoading(false);
@@ -90,13 +101,13 @@ const Popup: React.FC<PopupProps> = ({ onClose, onCollectionCreated }) => {
   };
 
   const submitDisabled =
-    !inputValue || Boolean(errorMessage) || isLoading || !username;
+    !courseCode || !!errorMessage || isLoading; // username no longer required by /vi/courses
 
   return (
     <Modal
       open
       centered
-      width={520}
+      width={560}
       title="Create Course"
       onCancel={isLoading ? undefined : onClose}
       maskClosable={!isLoading}
@@ -119,25 +130,49 @@ const Popup: React.FC<PopupProps> = ({ onClose, onCollectionCreated }) => {
       <Spin spinning={isLoading} tip="Creating...">
         <Form layout="vertical">
           <Form.Item
-            label="Course Code (Number Only)"
+            label="Course Code (lowercase letters / numbers / hyphen)"
             validateStatus={errorMessage ? "error" : ""}
           >
             <Input
-              value={inputValue}
-              onChange={handleInputChange}
-              placeholder="e.g. 1003"
+              value={courseCode}
+              onChange={handleCourseCodeChange}
+              placeholder="e.g. 1003 or cs1003 or cs-1003"
               autoFocus
               maxLength={64}
             />
           </Form.Item>
 
-          {containerExsists && (
+          <Form.Item label="Course Name">
+            <Input
+              value={courseName}
+              onChange={(e) => setCourseName(e.target.value)}
+              placeholder="e.g. Data Structures and Algorithms"
+              maxLength={128}
+            />
+          </Form.Item>
+
+          <Form.Item label="Description">
+            <Input.TextArea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="A short summary of the course"
+              rows={4}
+              maxLength={1000}
+              showCount
+            />
+          </Form.Item>
+
+          {containerExists && (
             <Alert
               type="error"
               showIcon
               message="Duplicate course code"
               description="This course code already exists. Please try a different one."
             />
+          )}
+
+          {!!errorMessage && !containerExists && (
+            <Alert type="error" showIcon message={errorMessage} />
           )}
         </Form>
       </Spin>

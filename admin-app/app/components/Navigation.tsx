@@ -103,7 +103,7 @@ const Navigation: React.FC = () => {
           width={280}
           open={menuOpen}
           onClose={() => setMenuOpen(false)}
-          bodyStyle={{ padding: 0 }}
+          // bodyStyle={{ padding: 0 }}
         >
           <Menu
             mode="inline"

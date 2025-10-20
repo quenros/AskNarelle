@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 import os
 from flask_cors import CORS
-from mongo_helper import  create_document, delete_all_course_documents, delete_document,  get_documents, update_movement_document, get_chatlogs, upload_course, list_courses, upload_domain, get_domain_files, delete_domain_docs, get_course_files_count, get_domain_files_count, get_users_count, get_queries_count, get_queries_by_month, get_queries_by_course, get_user_sentiments, get_user_emotions, check_if_rec_exists, get_course_users,  detele_course_user, add_activity, view_activities
+from mongo_helper import  create_document, delete_all_course_documents, delete_document,  get_documents, update_movement_document, get_chatlogs, upload_course, list_courses, upload_domain, get_domain_files, delete_domain_docs, get_course_files_count, get_domain_files_count, get_users_count, get_queries_count, get_queries_by_month, get_queries_by_course, get_user_sentiments, get_user_emotions, check_if_rec_exists, get_course_users,  detele_course_user, add_activity, view_activities, vi_add_course  
 from blob_storage_helper import createContainer, delete_blob_storage_container, upload_to_azure_blob_storage, delete_from_azure_blob_storage,delete_domain_virtual_folder, generate_sas_token
 from ai_search_helper import storeDocuments, moveToVectorStoreFunction,createIndexFunction, delete_index_function, delete_embeddings_function
 # from ai_search_helper_local import (storeDocuments, moveToVectorStoreFunction, createIndexFunction, delete_index_function, delete_embeddings_function)
@@ -13,14 +13,18 @@ from pytz import timezone,utc
 import requests
 from course_share_helper import get_access_token
 
+from brokerservice.brokerService import BrokerService
+# from brokerservice.repository import add_course
+
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
-
 blob_service_client = BlobServiceClient.from_connection_string(os.environ.get('AZURE_CONN_STRING'))
 graph_url = 'https://graph.microsoft.com/v1.0/'
+
+broker_service = BrokerService()
 
 @app.route("/vectorstore", methods=['PUT'])
 def storeInVectorStore():
@@ -636,6 +640,53 @@ def get_activities(username):
         return jsonify(activities), 201
     else:
         return jsonify({"message": "Error fetching activities"}), 500
+    
+
+@app.route("/vi/courses", methods=["POST"])
+def vi_create_course():
+    data = request.get_json(silent=True) or {}
+    course_code = (data.get("courseCode") or "")
+    course_name = (data.get("courseName") or "")
+    description = (data.get("description") or "")
+    collection_name = data.get('collectionName')
+    username = data.get('username')
+
+    if not course_code:
+        return jsonify({"error": "courseCode is required"}), 400
+
+    # code is similar to createcollection API, except this creates our course in Azure Cosmos DB
+    created = createContainer(course_code)
+    if not created:
+        return jsonify({"error": "Container already exists"}), 409
+
+    if not upload_course(collection_name, username):
+        return jsonify({"error": "Failed to register course in file_database"}), 500
+
+    vi_status = "created"
+    vi_payload = None
+    try:
+        successful = vi_add_course(
+            course_code=course_code,
+            course_name=course_name,
+            description=description,
+            owner_username=username
+        )
+    except Exception as e:
+        msg = str(e)
+        if "duplicate" in msg.lower():
+            vi_status = "exists"
+        else:
+            vi_status = "error"
+
+    if successful:
+        return jsonify({
+            "message": "Course created",
+            "courseCode": course_code,
+            # "owner": owner,
+            "viCourseStatus": vi_status,
+            "viCourse": vi_payload
+        }), 201
+    
 
 
 if __name__ == "__main__":

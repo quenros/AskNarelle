@@ -15,14 +15,13 @@ load_dotenv()
 
 mongo_uri = os.environ.get('MONGO_URI')
 print(mongo_uri)
-chat_mongo_uri = os.environ.get('CHAT_MONGO_URI')
+chat_mongo_uri = os.environ.get('COSMOS_MONGO_STRING')
 
 client = MongoClient(mongo_uri)
 chat_client = MongoClient(chat_mongo_uri)
 
 db = client['file_database']
 chatlogs_db = chat_client['chathistory-storage']
-
 
 def upload_course(course_name, username):
     username = username.lower()
@@ -604,6 +603,59 @@ def check_if_rec_exists(username, course_name):
          return True
      else:
          return False
+     
+
+#Video analyzer DB (Cosmos for Mongo vCore)
+vi_db = chat_client['videoindexer']               
+vi_courses = vi_db['course']      
+vi_videos = vi_db['video']
+
+
+# Call once on startup (e.g., from app.py) to enforce uniqueness
+def vi_ensure_indexes():
+    vi_courses.create_index([("courseCode")], unique=True)
+
+def vi_add_course(course_code: str, course_name: str, description: str, owner_username: str):
+    """
+    Adds a course record used by the video analyzer project.
+    Schema mirrors their expectations:
+      { courseCode, courseName, description, owners:[...], createdAt }
+    """
+    course_code = (course_code or "")
+    course_name = (course_name or "")
+    description = (description or "")
+    owner_username = (owner_username or "")
+
+    if not course_code:
+        raise ValueError("course_code and course_name are required")
+
+    doc = {
+        "courseCode": course_code,
+        "courseName": course_name,
+        "description": description,
+        "owners": [owner_username] if owner_username else [],
+        # "createdAt": datetime.utcnow().isoformat() + "Z",
+    }
+    vi_courses.insert_one(doc)
+    return True
+
+def vi_get_courses():
+    """Return all video-analyzer courses (omit _id for frontend cleanliness)."""
+    out = []
+    for c in vi_courses.find({}, {"_id": 0}):
+        out.append(c)
+    return out
+
+def vi_get_course_by_code(course_code: str):
+    return vi_courses.find_one({"courseCode": course_code}, {"_id": 0})
+
+def vi_add_owner(course_code: str, username: str):
+    username = username.lower()
+    vi_courses.update_one(
+        {"courseCode": course_code},
+        {"$addToSet": {"owners": username}}
+    )
+
      
 
 
