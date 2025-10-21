@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Modal,
   Upload,
@@ -16,7 +16,7 @@ import { InboxOutlined } from "@ant-design/icons";
 interface PopupProps {
   onClose: () => void;
   onFileCreated: () => void;
-  collectionName: string;
+  collectionName: string; 
   domainName: string;
   username: string;
 }
@@ -26,10 +26,7 @@ const { Text } = Typography;
 
 const DOC_EXTS = [".pdf", ".docx", ".pptx", ".txt"];
 const VIDEO_EXTS = [".mp4", ".mov", ".mkv", ".webm", ".avi"];
-const ACCEPT = [
-  ...DOC_EXTS,
-  ...VIDEO_EXTS,
-].join(",");
+const ACCEPT = [...DOC_EXTS, ...VIDEO_EXTS].join(",");
 
 const isDoc = (name?: string) =>
   !!name && DOC_EXTS.some((ext) => name.toLowerCase().endsWith(ext));
@@ -47,13 +44,11 @@ const DocumentPopup: React.FC<PopupProps> = ({
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // optional “advanced” chunking
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [chunkSize, setChunkSize] = useState(1000);
   const [overlap, setOverlap] = useState(100);
 
-  // progress stepper
-  // 0=Select, 1=Upload to Blob, 2=Vector store, 3=Database
+  // 0=Select, 1=Blob, 2=Vector, 3=Database / VI
   const [step, setStep] = useState(0);
 
   const docFiles = useMemo(
@@ -67,7 +62,7 @@ const DocumentPopup: React.FC<PopupProps> = ({
   const hasDocs = docFiles.length > 0;
   const hasVideos = videoFiles.length > 0;
 
-  const beforeUpload = () => false; // prevent auto-upload; we upload manually
+  const beforeUpload = () => false;
   const onRemove = (f: UploadFile) => {
     setFileList((prev) => prev.filter((x) => x.uid !== f.uid));
     return true;
@@ -86,12 +81,47 @@ const DocumentPopup: React.FC<PopupProps> = ({
     return resp;
   };
 
-  const buildFormData = () => {
+  // Build FormData with docs only (videos handled via VI API)
+  const buildDocsFormData = () => {
     const fd = new FormData();
-    fileList.forEach((f) => {
+    docFiles.forEach((f) => {
       if (f.originFileObj) fd.append("files", f.originFileObj);
     });
     return fd;
+  };
+
+  const fileToBase64 = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onloadend = () => (r.result ? resolve(r.result as string) : reject(new Error("Failed to read file")));
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+
+  const uploadVideosViaVI = async () => {
+    if (!hasVideos) return;
+
+    const videoPayload = await Promise.all(
+      videoFiles.map(async (vf) => {
+        const f = vf.originFileObj as File;
+        const base64 = await fileToBase64(f);
+        return {
+          video_name: vf.name,
+          base64_encoded_video: base64,
+          video_description: "",
+        };
+      })
+    );
+
+    setStep(3);
+    await doFetch("http://localhost:5000/vi/videos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        courseCode: collectionName,
+        video: videoPayload,
+      }),
+    });
   };
 
   const handleSubmit = async () => {
@@ -103,19 +133,18 @@ const DocumentPopup: React.FC<PopupProps> = ({
     setStep(1);
 
     try {
-      // 1) Upload to Blob
-      const formData = buildFormData();
-      await doFetch(
-        `http://localhost:5000/api/${collectionName}/${domainName}/${username}/createblob`,
-        { method: "PUT", body: formData }
-      );
+      // 1) DOCS → Blob
+      if (hasDocs) {
+        const formData = buildDocsFormData();
+        await doFetch(
+          `http://localhost:5000/api/${collectionName}/${domainName}/${username}/createblob`,
+          { method: "PUT", body: formData }
+        );
+      }
 
-      // 2) Only vectorize *documents* (skip videos)
+      // 2) DOCS → Vector
       if (hasDocs) {
         setStep(2);
-        console.log(collectionName)
-        console.log(chunkSize)
-        console.log(overlap)
         await doFetch("http://localhost:5000/vectorstore", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -127,17 +156,25 @@ const DocumentPopup: React.FC<PopupProps> = ({
         });
       }
 
-      // 3) Create DB records (for both docs & videos)
-      setStep(3);
-      await doFetch(
-        `http://localhost:5000/api/${collectionName}/${domainName}/${username}/createdocument`,
-        { method: "PUT", body: buildFormData() }
-      );
+      // 3A) DOCS → DB
+      if (hasDocs) {
+        setStep(3);
+        await doFetch(
+          `http://localhost:5000/api/${collectionName}/${domainName}/${username}/createdocument`,
+          { method: "PUT", body: buildDocsFormData() }
+        );
+      }
 
-      message.success("Files uploaded successfully");
+      // 3B) VIDEOS → VI API
+      if (hasVideos) {
+        await uploadVideosViaVI();
+      }
+
+      message.success("Upload complete");
       onFileCreated();
       onClose();
     } catch (err: any) {
+      console.error(err);
       message.error(err?.message || "Upload failed");
     } finally {
       setLoading(false);
@@ -175,7 +212,7 @@ const DocumentPopup: React.FC<PopupProps> = ({
             { title: "Select" },
             { title: "Blob" },
             { title: "Vector" },
-            { title: "Database" },
+            { title: "Database / VI" },
           ]}
         />
 
@@ -195,8 +232,8 @@ const DocumentPopup: React.FC<PopupProps> = ({
             Click or drag files to this area to upload
           </p>
           <p className="ant-upload-hint">
-            Allowed: PDF, DOCX, PPTX, TXT, and videos (MP4, MOV, MKV, WEBM,
-            AVI). Videos are stored but not vectorized.
+            Allowed: PDF, DOCX, PPTX, TXT (docs go to Blob → Vector → DB) and
+            videos (MP4, MOV, MKV, WEBM, AVI) which go to Video Indexer API.
           </p>
         </Dragger>
 
@@ -208,8 +245,8 @@ const DocumentPopup: React.FC<PopupProps> = ({
           </Text>
           {hasVideos && (
             <Text type="secondary">
-              {videoFiles.length} video file(s) will be uploaded to storage and
-              listed, but skipped for embeddings.
+              {videoFiles.length} video file(s) will be sent to the Video
+              Indexer API (not stored in Blob or vectorized here).
             </Text>
           )}
         </Space>

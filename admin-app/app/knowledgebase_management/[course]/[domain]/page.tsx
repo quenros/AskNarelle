@@ -76,11 +76,7 @@ function Fileslist({
 
   const [authorised, setAuthorised] = useState<boolean>(true);
   const [coursePresent, setCoursePresent] = useState<boolean>(true);
-
-  const { message } = App.useApp?.() ?? { message: undefined }; // optional; only if you wrap App at root
-
-  const searchParams = useSearchParams();
-  // You already pass via route params; leaving these here in case you later use search params
+  
   const collectionName = params.course;
   const domainName = params.domain;
 

@@ -47,15 +47,15 @@ const Popup: React.FC<PopupProps> = ({ onClose, onCollectionCreated }) => {
 
       // 1) Create Azure AI Search index (same as before)
       
-        // const resp = await fetch("http://localhost:5000/createindex", {
-        //   method: "PUT",
-        //   headers: { "Content-Type": "application/json" },
-        //   body: JSON.stringify({ collectionName: courseCode }),
-        // });
-        // if (!resp.ok) {
-        //   setErrorMessage("Failed to create AI search index");
-        //   return;
-        // }
+        const resp = await fetch("http://localhost:5000/createindex", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ collectionName: courseCode }),
+        });
+        if (!resp.ok) {
+          setErrorMessage("Failed to create AI search index");
+          return;
+        }
       
 
       // 2) Create container + Cosmos course record via your new endpoint

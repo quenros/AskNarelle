@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 import os
 from flask_cors import CORS
-from mongo_helper import  create_document, delete_all_course_documents, delete_document,  get_documents, update_movement_document, get_chatlogs, upload_course, list_courses, upload_domain, get_domain_files, delete_domain_docs, get_course_files_count, get_domain_files_count, get_users_count, get_queries_count, get_queries_by_month, get_queries_by_course, get_user_sentiments, get_user_emotions, check_if_rec_exists, get_course_users,  detele_course_user, add_activity, view_activities, vi_add_course  
+from mongo_helper import  create_document, delete_all_course_documents, delete_document,  get_documents, update_movement_document, get_chatlogs, upload_course, list_courses, upload_domain, get_domain_files, delete_domain_docs, get_course_files_count, get_domain_files_count, get_users_count, get_queries_count, get_queries_by_month, get_queries_by_course, get_user_sentiments, get_user_emotions, check_if_rec_exists, get_course_users,  detele_course_user, add_activity, view_activities, vi_add_course, check_if_course_exist, insert_video_indexing_progress  
 from blob_storage_helper import createContainer, delete_blob_storage_container, upload_to_azure_blob_storage, delete_from_azure_blob_storage,delete_domain_virtual_folder, generate_sas_token
 from ai_search_helper import storeDocuments, moveToVectorStoreFunction,createIndexFunction, delete_index_function, delete_embeddings_function
 # from ai_search_helper_local import (storeDocuments, moveToVectorStoreFunction, createIndexFunction, delete_index_function, delete_embeddings_function)
@@ -14,6 +14,7 @@ import requests
 from course_share_helper import get_access_token
 
 from brokerservice.brokerService import BrokerService
+from model import VideoDetails
 # from brokerservice.repository import add_course
 
 load_dotenv()
@@ -686,6 +687,82 @@ def vi_create_course():
             "viCourseStatus": vi_status,
             "viCourse": vi_payload
         }), 201
+    
+@app.route("/vi/videos", methods=["POST"])
+def vi_upload_videos():
+    """
+    Accepts:
+    {
+      "courseCode": "CS1003",
+      "video": [
+        {
+          "video_name": "Lecture 1",
+          "base64_encoded_video": "data:video/mp4;base64,AAA....",  # required (even if you don't process it yet)
+          "video_description": "Week 1 intro"
+        },
+        ...
+      ]
+    }
+    """
+    body = request.get_json(silent=True) or {}
+    course_code = (body.get("courseCode") or "").strip()
+    videos = body.get("video") or []
+    print(course_code)
+    print(videos)
+
+    if not course_code:
+        return jsonify({"error": "courseCode is required"}), 400
+    if not isinstance(videos, list) or len(videos) == 0:
+        return jsonify({"error": "video must be a non-empty list"}), 400
+
+    # Ensure course exists in the video-analyzer DB
+    course_doc = check_if_course_exist(course_code)
+    print(course_doc)
+    if not course_doc:
+        return jsonify({"error": f"Course not found: {course_code}"}), 404
+
+    course_id = course_doc["_id"]
+    registered, errors = [], []
+
+    # Register each video
+    for idx, v in enumerate(videos):
+        name = (v.get("video_name") or "").strip()
+        b64 = (v.get("base64_encoded_video") or "").strip()
+        desc = (v.get("video_description") or "").strip()
+
+        if not name or not b64:
+            errors.append({
+                "index": idx,
+                "error": "video_name and base64_encoded_video are required"
+            })
+            continue
+
+        try:
+            vd = VideoDetails(
+                video_name=name,
+                video_description=desc,
+                video_id=""  # to be filled later by Video Indexer, if applicable
+            )
+            video_id = insert_video_indexing_progress(vd, course_id)
+            vd.video_id = video_id
+            registered.append({
+                "index": idx,
+                "video_id": str(video_id),
+                "video_name": name
+            })
+        except Exception as e:
+            errors.append({
+                "index": idx,
+                "error": str(e),
+                "video_name": name
+            })
+
+    status_code = 201 if registered else 400
+    return jsonify({
+        "courseCode": course_code,
+        "registered": registered,
+        "errors": errors
+    }), status_code
     
 
 

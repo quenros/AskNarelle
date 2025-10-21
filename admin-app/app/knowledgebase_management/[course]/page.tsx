@@ -45,7 +45,7 @@ function DomainContent({ params }: { params: { course: string } }) {
   const [coursePresent, setCoursePresent] = useState<boolean>(true);
 
   const searchParams = useSearchParams();
-  const collectionName = params.course; // searchParams.get("query") || '';
+  const collectionName = params.course;
 
   const accounts = msalInstance.getAllAccounts();
   const username = accounts[0]?.username;
