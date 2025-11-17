@@ -1,50 +1,14 @@
-# langchain
-# openai~=1.62.0
-# python-dotenv
-# azure-storage-blob
-# unstructured
-# azure-identity
-# azure-search-documents
-# langchain-community
-# Flask
-# langchain_openai~=0.3.6
-# flask-cors
-# pymongo~=4.11.1
-# pytz
-# python-docx
-# PyMuPDF
-# gunicorn
-# dnspython
-# python-pptx
-# chromadb
-# sentence-transformers
-# langchain_community~=0.3.17
-
-# fastapi~=0.115.8
-# uvicorn~=0.34.0
-# requests~=2.32.3
-# azure-ai-vision-imageanalysis~=1.0.0
-# azure-identity~=1.20.0
-# ffmpeg-python~=0.2.0
-# ffmpegcv~=0.3.16
-# langchain-text-splitters~=0.3.6
-# datasets~=3.3.1
-# ragas~=0.2.13
-# bcrypt~=4.3.0
-# schedule~=1.2.2
-
 langchain
 openai
 python-dotenv
 azure-storage-blob
 unstructured
-azure-identity
 azure-search-documents
 langchain-community
 Flask
-langchain_openai
+langchain_openai~=0.3.6
 flask-cors
-pymongo
+pymongo~=4.11.1
 pytz
 python-docx
 PyMuPDF
@@ -53,18 +17,19 @@ dnspython
 python-pptx
 chromadb
 sentence-transformers
-langchain_community
 
-fastapi
-uvicorn
-requests
-azure-ai-vision-imageanalysis
-azure-identity
-ffmpeg-python
-ffmpegcv
-langchain-text-splitters
-datasets
-ragas
-bcrypt
-schedule
-
+fastapi~=0.115.8
+uvicorn~=0.34.0
+requests~=2.32.3
+azure-ai-vision-imageanalysis~=1.0.0
+azure-identity~=1.20.0
+ffmpeg-python~=0.2.0
+ffmpegcv~=0.3.16
+langchain-text-splitters~=0.3.6
+datasets~=3.3.1
+ragas~=0.2.13
+bcrypt~=4.3.0
+schedule~=1.2.2
+pydantic>=2.9.2,<3
+cffi
+cryptography>=42

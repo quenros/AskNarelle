@@ -25,7 +25,8 @@ class DatabaseService:
 
     def _initialize(self):
         """Initializes MongoDB connection with connection pooling."""
-        self.mongo_connection_string = os.getenv("COSMOS_MONGO_STRING")
+        # self.mongo_connection_string = os.getenv("COSMOS_MONGO_STRING")
+        self.mongo_connection_string = os.getenv("MONGO_URI")
         self.database_name = os.getenv("DB_NAME")
 
         if not self.mongo_connection_string or not self.database_name:

@@ -282,7 +282,7 @@ def storeDocuments(containername, chunksize, overlap):
 #         print(f"An error occurred: {e}")
 #         return False
 
-def moveToVectorStoreFunction(containername, domainname, versionid, chunksize, overlap, filename):
+def moveToVectorStoreFunction(containername, domainname, chunksize, overlap, filename):
     try:
         search_client = SearchClient(
             endpoint=os.environ.get('AZURE_COGNITIVE_SEARCH_ENDPOINT'),
@@ -292,7 +292,7 @@ def moveToVectorStoreFunction(containername, domainname, versionid, chunksize, o
 
         text_splitter = CharacterTextSplitter(chunk_size=chunksize, chunk_overlap=overlap)
         blob_client = blob_service_client.get_blob_client(container=containername, 
-                                                          blob=f"{domainname}/{filename}", version_id=versionid)
+                                                          blob=f"{domainname}/{filename}")
         blob_content = blob_client.download_blob().readall()
 
         file_readers = {

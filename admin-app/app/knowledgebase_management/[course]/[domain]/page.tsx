@@ -241,6 +241,7 @@ function Fileslist({
             <FilesTable
               files={filteredFiles}
               collectionName={collectionName}
+              domainName={domainName}
               onFileDeleted={handlePressDelete}
               onFileMoved={handlePressMovement}
               onBlobDeleted={handlePressBlobDelete}

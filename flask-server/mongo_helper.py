@@ -18,13 +18,13 @@ load_dotenv()
 
 mongo_uri = os.environ.get('MONGO_URI')
 print(mongo_uri)
-chat_mongo_uri = os.environ.get('COSMOS_MONGO_STRING')
+# chat_mongo_uri = os.environ.get('COSMOS_MONGO_STRING')
 
 client = MongoClient(mongo_uri)
-chat_client = MongoClient(chat_mongo_uri)
+# chat_client = MongoClient(chat_mongo_uri)
 
 db = client['file_database']
-chatlogs_db = chat_client['chathistory-storage']
+chatlogs_db = client['chathistory-storage']
 
 def upload_course(course_name, username):
     username = username.lower()
@@ -118,26 +118,33 @@ def upload_domain(domain_name, course_name):
 def create_document(files):
     try:
         for file in files:
-            
+            base_filter = {
+                "course_name": file["course_name"],
+                "domain": file["domain"],
+                "name": file["name"],
+            }
+
             db["uploaded_files"].update_many(
-                {"name": file['name'], "in_vector_store": "yes"},
+                {**base_filter, "in_vector_store": "yes"},
                 {"$set": {"in_vector_store": "no"}}
             )
 
             db["uploaded_files"].update_many(
-                {"name": file['name'], "is_root_blob": "yes"},
+                {**base_filter, "is_root_blob": "yes"},
                 {"$set": {"is_root_blob": "no"}}
             )
 
             db["uploaded_files"].update_one(
-                {"version_id": file['version_id']},
-                {"$set": file},           
-                upsert=True             
+                {"version_id": file["version_id"]},
+                {"$set": file},
+                upsert=True
             )
+
         return True
     except Exception as e:
         print(f"An error occurred: {e}")
         return False
+
     
 def add_activity(activities):
     try:
@@ -298,7 +305,7 @@ def get_course_users(courseName):
         print(e)
         return False
     
-def detele_course_user(courseName, user):
+def delete_course_user(courseName, user):
     try:
         db["courses"].delete_one({"course_name": courseName, "user": user})
         return True
@@ -606,225 +613,7 @@ def check_if_rec_exists(username, course_name):
          return True
      else:
          return False
-     
-
-#Video analyzer DB (Cosmos for Mongo vCore)
-vi_db = chat_client['videoindexer']               
-vi_courses = vi_db['course']      
-vi_videos = vi_db['video']
-vi_raw = vi_db.get_collection("video_indexer_raw")
-vi_prompts = vi_db.get_collection("prompt_content_raw")
-
-
-# Call once on startup (e.g., from app.py) to enforce uniqueness
-def vi_ensure_indexes():
-    # Uniqueness for course code
-    vi_courses.create_index("course_code", unique=True)
-    # Lookups for course and video indexer ids.
-    vi_videos.create_index("course_reference_id")
-    vi_videos.create_index("video_id")
-
-def vi_add_course(course_code: str, course_name: str, description: str, owner_username: str):
-    """
-    Adds a course record used by the video analyzer project.
-    Schema mirrors their expectations:
-      { courseCode, courseName, description, owners:[...], createdAt }
-    """
-    course_code = (course_code or "")
-    course_name = (course_name or "")
-    description = (description or "")
-    owner_username = (owner_username or "")
-
-    if not course_code:
-        raise ValueError("course_code and course_name are required")
-
-    doc = {
-        "course_code": course_code,
-        "course_name": course_name,
-        "course_description": description,
-        "owners": [owner_username] if owner_username else [],
-        # "createdAt": datetime.utcnow().isoformat() + "Z",
-    }
-    vi_courses.insert_one(doc)
-    return True
-
-def vi_get_courses():
-    """Return all video-analyzer courses."""
-    out = []
-    for c in vi_courses.find({}, {"_id": 0}):
-        out.append(c)
-    return out
-
-def vi_get_course_by_code(course_code: str):
-    return vi_courses.find_one({"course_code": course_code}, {"_id": 0})
-
-
-def vi_add_owner(course_code: str, username: str):
-    username = username.lower()
-    vi_courses.update_one(
-        {"course_code": course_code},
-        {"$addToSet": {"owners": username}}
-    )
-
-def vi_update_course_details(course_details: CourseDetails):
-    filter_query = {"course_code": course_details.course_id}
-    course_update = {
-        "course_name": course_details.course_name,
-        "course_description": course_details.course_description
-    }
-    result = vi_courses.update_one(filter_query, {"$set": course_update})
-    return result.matched_count > 0
-
-def check_if_course_exist(course_code: str):
-    """
-    Returns the course document.
-    """
-    doc = vi_courses.find_one({"course_code": course_code})
-    return doc or {}
-
-def update_visibility_option_course(course_id, visibility):
-        filter_query = {"course_code": course_id}
-        visibility_update = {"visibility": visibility}
-        result = vi_courses.update_one(filter_query, {"$set": visibility_update})
-        if result.matched_count > 0:
-            print("Course Document Visibility updated successfully.")
-            return result.upserted_id
-        else:
-            print("No matching document found.")
-            return 0
-
-# Video indexer
-
-class Status(str, Enum):
-    IN_PROGRESS = "IN_PROGRESS"
-    COMPLETED   = "COMPLETED"
-    ERROR       = "ERROR"
-
-def insert_video_indexing_progress(video: VideoDetails, course_id: ObjectId):
-        """
-        Insert Video to Video Collection and update Course with video ID.
-
-        Args:
-            video (VideoDetails): Number of seconds. Required.
-            course_id (ObjectId): Object ID of Course. Required.
-
-        Returns:
-            ObjectId: video_id
-        """
-        doc = {
-            "name": video.video_name,
-            "status": Status.IN_PROGRESS.value,
-            "course_reference_id": course_id,
-            "video_description": video.video_description,
-            # "video_id" (from VI) and "thumbnail" come later
-            "visibility": "PRIVATE",
-        }
-        video_id = vi_videos.insert_one(doc).inserted_id
-
-        vi_courses.update_one(
-            {"_id": course_id},
-            {"$push": {"videos": video_id}},
-            upsert=False
-        )
-        return video_id
-
-def update_video_id_thumbnail(video_object_id: ObjectId, video_id: str, video_thumbnail: str):
-    filter_query = {"_id": video_object_id}
-
-    new_fields = {
-        "video_id": video_id,
-        "thumbnail": "data:image/jpeg;base64," + video_thumbnail
-    }
-    result = vi_videos.update_one(filter_query, {"$set": new_fields})
-    if result.matched_count > 0:
-        print("Video Document Thumbnail updated successfully.")
-    else:
-        print("No matching Video Document found.")
-
-def change_video_status(video_object_id: ObjectId, status_new: Status):
-    filter_query = {"_id": video_object_id}
-
-    new_fields = {
-        "status": status_new.value,
-        "visibility": "PRIVATE"
-    }
-    result = vi_videos.update_one(filter_query, {"$set": new_fields})
-    if result.matched_count > 0:
-        return("Video Status updated successfully for ID: " + str(video_object_id))
-    else:
-        return("No matching document found for ID: " + str(video_object_id))
     
-
-def update_video_details(video: VideoDetails):
-        filter_query = {"video_id": video.video_id}
-        video_update = {"name": video.video_name, "summary": video.video_description}
-        result = vi_videos.update_one(filter_query, {"$set": video_update})
-        if result.matched_count > 0:
-            print("Video Document updated successfully for Video ID: ", video.video_id)
-            return True
-        else:
-            print("No Video Document found for Video Code: ", video.video_id)
-            return False
-
-def get_course_videos():
-        course_video_result = []
-        # TODO: Filter based on visibility
-        result = vi_courses.find({'visibility': 'PUBLIC'})
-
-        for course in result:
-            course_video_dict = {
-                "courseName": course.get("course_name"),
-                "courseCode": course.get("course_code"),
-                "visibility": course.get("visibility")
-            }
-            course_videos = []
-            # Only PUBLIC & COMPLETED videos
-            video_result = vi_videos.find({
-                '_id': {'$in': course.get("videos", [])},
-                'status': 'COMPLETED',
-                'visibility': 'PUBLIC'
-            })
-            for video in video_result:
-                course_videos.append({
-                    "videoName": video.get("name", ""),
-                    "summary": video.get("video_description", ""),
-                    "videoId": video.get("video_id", ""),
-                    "thumbnail": video.get("thumbnail", ""),
-                    "visibility": video.get("visibility", ""),
-                    "status": video.get("status", "")
-                })
-            course_video_dict["courseVideos"] = course_videos
-            course_video_result.append(course_video_dict)
-
-        return course_video_result
-
-def get_course_videos_manage():
-        course_video_result = []
-        result = vi_courses.find()
-        for course in result:
-            course_video_dict = {
-                "courseName": course.get("course_name"),
-                "courseCode": course.get("course_code"),
-                "visibility": course.get("visibility")
-            }
-            course_videos = []
-            video_result = vi_videos.find({
-                '_id': {'$in': course.get("videos", [])}
-            })
-            for video in video_result:
-                course_videos.append({
-                    "videoName": video.get("name", ""),
-                    "summary": video.get("video_description", ""),
-                    "videoId": video.get("video_id", ""),
-                    "thumbnail": video.get("thumbnail", ""),
-                    "visibility": video.get("visibility", ""),
-                    "status": video.get("status", "")
-                })
-            course_video_dict["courseVideos"] = course_videos
-            course_video_result.append(course_video_dict)
-
-        return course_video_result
-        
     
 
 

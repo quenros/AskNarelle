@@ -16,7 +16,7 @@ import { InboxOutlined } from "@ant-design/icons";
 interface PopupProps {
   onClose: () => void;
   onFileCreated: () => void;
-  collectionName: string; 
+  collectionName: string;
   domainName: string;
   username: string;
 }
@@ -81,10 +81,9 @@ const DocumentPopup: React.FC<PopupProps> = ({
     return resp;
   };
 
-  // Build FormData with docs only (videos handled via VI API)
-  const buildDocsFormData = () => {
+  const buildFormData = (files: UploadFile[]) => {
     const fd = new FormData();
-    docFiles.forEach((f) => {
+    files.forEach((f) => {
       if (f.originFileObj) fd.append("files", f.originFileObj);
     });
     return fd;
@@ -93,7 +92,10 @@ const DocumentPopup: React.FC<PopupProps> = ({
   const fileToBase64 = (file: File) =>
     new Promise<string>((resolve, reject) => {
       const r = new FileReader();
-      r.onloadend = () => (r.result ? resolve(r.result as string) : reject(new Error("Failed to read file")));
+      r.onloadend = () =>
+        r.result
+          ? resolve(r.result as string)
+          : reject(new Error("Failed to read file"));
       r.onerror = reject;
       r.readAsDataURL(file);
     });
@@ -133,14 +135,11 @@ const DocumentPopup: React.FC<PopupProps> = ({
     setStep(1);
 
     try {
-      // 1) DOCS → Blob
-      if (hasDocs) {
-        const formData = buildDocsFormData();
-        await doFetch(
-          `http://localhost:5000/api/${collectionName}/${domainName}/${username}/createblob`,
-          { method: "PUT", body: formData }
-        );
-      }
+      const formData = buildFormData(fileList);
+      await doFetch(
+        `http://localhost:5000/api/${collectionName}/${domainName}/${username}/createblob`,
+        { method: "PUT", body: formData }
+      );
 
       // 2) DOCS → Vector
       if (hasDocs) {
@@ -156,14 +155,11 @@ const DocumentPopup: React.FC<PopupProps> = ({
         });
       }
 
-      // 3A) DOCS → DB
-      if (hasDocs) {
-        setStep(3);
-        await doFetch(
-          `http://localhost:5000/api/${collectionName}/${domainName}/${username}/createdocument`,
-          { method: "PUT", body: buildDocsFormData() }
-        );
-      }
+      setStep(3);
+      await doFetch(
+        `http://localhost:5000/api/${collectionName}/${domainName}/${username}/createdocument`,
+        { method: "PUT", body: buildFormData(fileList) }
+      );
 
       // 3B) VIDEOS → VI API
       if (hasVideos) {
@@ -233,7 +229,8 @@ const DocumentPopup: React.FC<PopupProps> = ({
           </p>
           <p className="ant-upload-hint">
             Allowed: PDF, DOCX, PPTX, TXT (docs go to Blob → Vector → DB) and
-            videos (MP4, MOV, MKV, WEBM, AVI) which go to Video Indexer API.
+            videos (MP4, MOV, MKV, WEBM, AVI) which go to Blob → DB and are also
+            registered with the Video Indexer API.
           </p>
         </Dragger>
 
@@ -245,8 +242,8 @@ const DocumentPopup: React.FC<PopupProps> = ({
           </Text>
           {hasVideos && (
             <Text type="secondary">
-              {videoFiles.length} video file(s) will be sent to the Video
-              Indexer API (not stored in Blob or vectorized here).
+              {videoFiles.length} video file(s) will be stored in Blob / DB and
+              sent to the Video Indexer API (not vectorized).
             </Text>
           )}
         </Space>

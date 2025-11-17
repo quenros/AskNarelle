@@ -3,11 +3,9 @@ import os
 from datetime import datetime, timedelta
 from azure.core.exceptions import ResourceExistsError
 from azure.core.credentials import AzureNamedKeyCredential
-
-
+from typing import List, Dict, Any
 
 connection_string = os.environ.get('AZURE_CONN_STRING')
-storage_account_name = "sc1015filestorage"
 storage_account_key = os.environ.get('AZURE_STORAGE_KEY')
 
 blob_service_client = BlobServiceClient.from_connection_string(connection_string)
@@ -112,6 +110,63 @@ def delete_from_azure_blob_storage(containerName, blobName, domainName, versionI
     except Exception as error:
         print(f"Error deleting file: {error}")
         return False
+    
+
+def attach_sas_urls_to_documents(documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Given a list of Mongo 'uploaded_files' documents, attach a SAS-based URL
+    for each real blob (skips placeholder/null docs).
+
+    Expected fields per doc:
+      - course_name: the container name (e.g. "1010")
+      - blob_name: the blob path inside the container (e.g. "ml/answer.txt")
+
+    The function mutates the list in-place and also returns it for convenience.
+    """
+    for doc in documents:
+        container_name = doc.get("course_name")
+        blob_name = doc.get("blob_name")
+
+        # Skip if we don't have a real blob reference (e.g. "null" placeholder rows)
+        if not container_name or not blob_name or blob_name == "null":
+            continue
+
+        try:
+            sas_token = generate_sas_token(container_name, blob_name)
+            blob_url = (
+                f"https://{blob_service_client.account_name}.blob.core.windows.net/"
+                f"{container_name}/{blob_name}?{sas_token}"
+            )
+            doc["url"] = blob_url  # overwrite any stale URL from DB
+        except Exception as e:
+            # Don't blow up the whole request for one bad blob;
+            # just log/print and leave URL untouched.
+            print(f"Failed to generate SAS for {container_name}/{blob_name}: {e}")
+
+    return documents
+
+def build_blob_sas_url(container_name: str, blob_name: str) -> str:
+    """
+    Return a SAS token for the given blob.
+    """
+    sas_token = generate_sas_token(container_name, blob_name)
+    return (
+        f"https://{blob_service_client.account_name}.blob.core.windows.net/"
+        f"{container_name}/{blob_name}?{sas_token}"
+    )
+
+
+def get_blob_text(container_name: str, blob_name: str) -> str:
+    """
+    Download a blob as UTF-8 text (with replacement for invalid bytes).
+    """
+    container_client = blob_service_client.get_container_client(container_name)
+    blob_client = container_client.get_blob_client(blob_name)
+
+    downloader = blob_client.download_blob()
+    data = downloader.readall()
+    text = data.decode("utf-8", errors="replace")
+    return text
 
 def generate_sas_token(container_name, blob_name):
     blob_service_client = BlobServiceClient.from_connection_string(connection_string)
