@@ -6,13 +6,15 @@ interface FileDeletionPopupProps {
   fileName: string;
   collectionName: string;
   domainName: string;
-  id: string;
+  id: string; // File Storage ID
   version_id: string;
   is_root_blob: string; // "yes" | "no"
   username: string;
+  vi_mongo_id?: string; 
   onFileDeleted: () => void;
   onClose: () => void;
 }
+
 
 const FileDeletionPopup: React.FC<FileDeletionPopupProps> = ({
   fileName,
@@ -22,6 +24,7 @@ const FileDeletionPopup: React.FC<FileDeletionPopupProps> = ({
   version_id,
   is_root_blob,
   username,
+  vi_mongo_id,
   onFileDeleted,
   onClose,
 }) => {
@@ -42,16 +45,39 @@ const FileDeletionPopup: React.FC<FileDeletionPopupProps> = ({
     let embedOk = false;
 
     try {
-      // 1) Try to delete embeddings (ok if not found / not vectorized)
+      // ---------------------------------------------------------
+      // 1) Handle Video Indexer Deletion
+      // ---------------------------------------------------------
+      // Only attempt if we actually have a Video Indexer ID passed to us
+      if (vi_mongo_id) {
+        try {
+          const vResp = await fetch(`http://localhost:5000/api/vi/delete_video`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: vi_mongo_id }), // Use the VI Mongo ID
+          });
+          
+          if (!vResp.ok) {
+            console.warn("Failed to delete from Video Indexer, proceeding to blob delete.");
+          }
+        } catch (vErr) {
+          console.error("Error contacting Video Indexer delete API", vErr);
+        }
+      }
+
+      // ---------------------------------------------------------
+      // 2) Delete Embeddings
+      // ---------------------------------------------------------
       const eResp = await fetch(`http://localhost:5000/api/${collectionName}/deleteembeddings`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ _id: id, fileName }),
       });
-      // Treat 201 as success, others as soft-fail but continue
       embedOk = eResp.ok || eResp.status === 201;
 
-      // 2) Delete the document/blob
+      // ---------------------------------------------------------
+      // 3) Delete Document (Blob + generic Record)
+      // ---------------------------------------------------------
       const dResp = await fetch(
         `http://localhost:5000/api/${collectionName}/${domainName}/deletedocument`,
         {

@@ -2,17 +2,19 @@
 
 import React, { useEffect, useState } from "react";
 import { useSearchParams, useParams, useRouter } from "next/navigation";
-import { Typography, Button, Spin } from "antd";
+import { Typography, Button, Spin, Space } from "antd";
+import { MessageOutlined } from "@ant-design/icons";
 
 const { Title, Paragraph, Text } = Typography;
 
-type PreviewKind = "text" | "pdf" | "video" | "other";
+type PreviewKind = "text" | "pdf" | "video" | "office" | "other";
 
 interface PreviewResponse {
   name: string;
   kind: PreviewKind;
-  content?: string; // for text
-  url?: string;     // for pdf / video / other
+  content?: string;
+  url?: string;
+  id?: string; // Optional ID from backend
 }
 
 const PreviewPage: React.FC = () => {
@@ -20,7 +22,10 @@ const PreviewPage: React.FC = () => {
   const { course, domain } = useParams<{ course: string; domain: string }>();
   const router = useRouter();
 
+  // 1. Get 'name' and 'id' from the URL parameters
+  // The 'id' here is passed from your FilesTable (it is the vi_mongo_id)
   const name = searchParams.get("name") || "";
+  const passedId = searchParams.get("id"); 
 
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -53,18 +58,28 @@ const PreviewPage: React.FC = () => {
       .finally(() => setLoading(false));
   }, [course, domain, name]);
 
-  // No filename in query
   if (!name) {
     return (
       <div style={{ padding: 24 }}>
         <Title level={3}>No file selected</Title>
-        <Paragraph>
-          The preview page needs a <Text code>name</Text> query parameter.
-        </Paragraph>
         <Button onClick={() => router.back()}>Back</Button>
       </div>
     );
   }
+
+  const handleChatClick = () => {
+    if (!preview) return;
+
+    // 2. Use the 'passedId' (from URL) first. 
+    // If not there, check if backend sent an ID ('preview.id'). 
+    // Fallback to 'preview.name' (filename).
+    const videoIdentifier = passedId || preview.id || preview.name; 
+    
+    // Navigate to Chat Page
+    router.push(
+      `/knowledgebase_management/${encodeURIComponent(course)}/${encodeURIComponent(domain)}/preview/chat?id=${encodeURIComponent(videoIdentifier)}&name=${encodeURIComponent(preview.name)}`
+    );
+  };
 
   return (
     <div style={{ padding: 24, maxWidth: 1000, margin: "0 auto" }}>
@@ -86,7 +101,20 @@ const PreviewPage: React.FC = () => {
             {String(course)} / {String(domain)}
           </Text>
         </div>
-        <Button onClick={() => router.back()}>Back</Button>
+
+        {/* Button Area */}
+        <Space>
+          {preview?.kind === "video" && (
+            <Button 
+                type="primary" 
+                icon={<MessageOutlined />} 
+                onClick={handleChatClick}
+            >
+                Chat with Video
+            </Button>
+          )}
+          <Button onClick={() => router.back()}>Back</Button>
+        </Space>
       </div>
 
       {/* Loading & error */}
@@ -110,7 +138,9 @@ const PreviewPage: React.FC = () => {
           {/* TEXT PREVIEW */}
           {preview.kind === "text" && (
             <>
-              <Paragraph type="secondary">Text preview</Paragraph>
+              <Paragraph type="secondary">
+                 {preview.name.endsWith('.csv') ? "CSV Preview" : "Text Preview"}
+              </Paragraph>
               <div
                 style={{
                   background: "#f5f5f5",
@@ -158,20 +188,29 @@ const PreviewPage: React.FC = () => {
                   }}
                 />
               </div>
+            </>
+          )}
+
+           {/* OFFICE (.docx) PREVIEW */}
+           {preview.kind === "office" && preview.url && (
+            <>
+              <Paragraph type="secondary">Document Preview</Paragraph>
+              <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #e5e5e5" }}>
+                <iframe
+                  src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(preview.url)}`}
+                  title={preview.name}
+                  style={{ width: "100%", height: "80vh", border: "none" }}
+                />
+              </div>
               <div style={{ marginTop: 8, textAlign: "right" }}>
-                <a
-                  href={preview.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ fontSize: 12 }}
-                >
-                  Open PDF in new tab
-                </a>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                    Powered by Microsoft Office Viewer
+                </Text>
               </div>
             </>
           )}
 
-          {/* VIDEO PREVIEW (once backend supports kind: "video") */}
+          {/* VIDEO PREVIEW */}
           {preview.kind === "video" && preview.url && (
             <>
               <Paragraph type="secondary">Video preview</Paragraph>

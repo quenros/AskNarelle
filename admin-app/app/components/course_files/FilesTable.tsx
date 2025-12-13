@@ -17,9 +17,9 @@ import {
   CloudUploadOutlined,
   DeleteOutlined,
   DeleteTwoTone,
-  LinkOutlined,
   DownloadOutlined,
   EyeOutlined,
+  LoadingOutlined,
 } from "@ant-design/icons";
 import dayjs, { Dayjs } from "dayjs";
 
@@ -27,26 +27,29 @@ const { RangePicker } = DatePicker;
 const { Text } = Typography;
 
 interface Document {
-  _id: string;
+  _id: string; // File Storage ID
   name: string;
   url: string;
   version_id: string;
-  date_str: string; // "YYYY-MM-DD"
-  time_str: string; // "HH:mm:ss"
-  in_vector_store: string; // "yes" or "no"
-  is_root_blob: string; // "yes" or "no"
+  date_str: string;
+  time_str: string;
+  in_vector_store: string;
+  is_root_blob: string;
+  status?: string;
+  vi_mongo_id?: string; // NEW: VI Database ID
 }
 
 interface FileTableProps {
   files: Document[];
-  collectionName: string; // course, e.g. "1010"
-  domainName: string;     // domain, e.g. "ml"
+  collectionName: string;
+  domainName: string;
   onFileDeleted: (
     id: string,
     collection: string,
     file: string,
     version_id: string,
-    is_root_blob: string
+    is_root_blob: string,
+    vi_mongo_id?: string
   ) => void;
   onFileMoved: (
     id: string,
@@ -83,7 +86,6 @@ const FilesTable: React.FC<FileTableProps> = ({
 }) => {
   const router = useRouter();
 
-  // toolbar filters
   const [vecFilter, setVecFilter] = useState<"yes" | "no" | "">("");
   const [rootFilter, setRootFilter] = useState<"yes" | "no" | "">("");
   const [range, setRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
@@ -94,16 +96,11 @@ const FilesTable: React.FC<FileTableProps> = ({
       const rootOk = !rootFilter || d.is_root_blob === rootFilter;
 
       if (!range || (!range[0] && !range[1])) return vecOk && rootOk;
-
       const docDay = dayjs(d.date_str, "YYYY-MM-DD");
       const startOk =
-        !range[0] ||
-        docDay.isSame(range[0], "day") ||
-        docDay.isAfter(range[0], "day");
+        !range[0] || docDay.isSame(range[0], "day") || docDay.isAfter(range[0], "day");
       const endOk =
-        !range[1] ||
-        docDay.isSame(range[1], "day") ||
-        docDay.isBefore(range[1], "day");
+        !range[1] || docDay.isSame(range[1], "day") || docDay.isBefore(range[1], "day");
       return vecOk && rootOk && startOk && endOk;
     });
   }, [files, vecFilter, rootFilter, range]);
@@ -116,42 +113,60 @@ const FilesTable: React.FC<FileTableProps> = ({
       ellipsis: true,
       sorter: (a, b) => a.name.localeCompare(b.name),
       render: (_, record) => {
-        const params = new URLSearchParams({
-          name: record.name,
-          url: `http://localhost:5000/api/preview/${collectionName}/${domainName}?name=${record.name}`,
-        }).toString();
+        const isProcessing = record.status === "IN_PROGRESS";
+        
+        // --- UPDATE STARTS HERE ---
+        // We define the params object with proper types
+        const queryParams: Record<string, string> = {
+            name: record.name,
+            url: `http://localhost:5000/api/preview/${collectionName}/${domainName}?name=${record.name}`,
+        };
+
+        if (record.vi_mongo_id) {
+          console.log(record)
+            queryParams.id = record.vi_mongo_id;
+        }
+
+        const params = new URLSearchParams(queryParams).toString();
 
         return (
           <Space size="small" wrap>
-            {/* Preview link */}
-            <Tooltip title="Preview file">
-              <a
-                onClick={(e) => {
-                  e.preventDefault();
-                  router.push(
-                    `/knowledgebase_management/${encodeURIComponent(
-                      collectionName
-                    )}/${encodeURIComponent(domainName)}/preview?${params}`
-                    
-                  );
-                }}
-              >
-                <EyeOutlined /> {record.name}
-              </a>
-            </Tooltip>
+            {isProcessing ? (
+              <Tooltip title="File is being processed...">
+                <LoadingOutlined spin style={{ color: "#1890ff" }} />
+                <Text type="secondary" style={{ marginLeft: 8 }}>
+                  {record.name}
+                </Text>
+              </Tooltip>
+            ) : (
+              <>
+                <Tooltip title="Preview file">
+                  <a
+                    onClick={(e) => {
+                      e.preventDefault();
+                      router.push(
+                        `/knowledgebase_management/${encodeURIComponent(
+                          collectionName
+                        )}/${encodeURIComponent(domainName)}/preview?${params}`
+                      );
+                    }}
+                  >
+                    <EyeOutlined /> {record.name}
+                  </a>
+                </Tooltip>
 
-            {/* Direct open / download */}
-            <Tooltip title="Open/download">
-              <a
-                href={record.url}
-                download={record.name}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <DownloadOutlined />
-              </a>
-            </Tooltip>
-
+                <Tooltip title="Open/download">
+                  <a
+                    href={record.url}
+                    download={record.name}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <DownloadOutlined />
+                  </a>
+                </Tooltip>
+              </>
+            )}
             {isDoc(record.name) && <Tag color="cyan">Document</Tag>}
             {isVideo(record.name) && <Tag color="purple">Video</Tag>}
           </Space>
@@ -159,18 +174,20 @@ const FilesTable: React.FC<FileTableProps> = ({
       },
     },
     {
-      title: "Vectorized",
+      title: "Vectorized / Index",
       dataIndex: "in_vector_store",
       key: "vector",
-      width: 140,
-      filters: [
-        { text: "Yes", value: "yes" },
-        { text: "No", value: "no" },
-      ],
-      onFilter: (v, rec) => rec.in_vector_store === v,
+      width: 150,
       render: (v: string, rec) => {
         if (isVideo(rec.name)) {
-          return <Tag>Not applicable</Tag>;
+          if (rec.status === "IN_PROGRESS")
+            return (
+              <Tag icon={<LoadingOutlined spin />} color="processing">
+                Indexing...
+              </Tag>
+            );
+          if (rec.status === "ERROR") return <Tag color="error">Index Failed</Tag>;
+          return <Tag color="purple">Video Index</Tag>;
         }
         return v === "yes" ? (
           <Tag color="green">Searchable</Tag>
@@ -183,12 +200,7 @@ const FilesTable: React.FC<FileTableProps> = ({
       title: "Root File",
       dataIndex: "is_root_blob",
       key: "root",
-      width: 120,
-      filters: [
-        { text: "Yes", value: "yes" },
-        { text: "No", value: "no" },
-      ],
-      onFilter: (v, rec) => rec.is_root_blob === v,
+      width: 100,
       render: (v: string) =>
         v === "yes" ? <Tag color="blue">Root</Tag> : <Tag>Derived</Tag>,
     },
@@ -203,26 +215,29 @@ const FilesTable: React.FC<FileTableProps> = ({
       render: (v: string) => <Text>{v}</Text>,
     },
     {
-      title: "Time",
-      dataIndex: "time_str",
-      key: "time",
-      width: 120,
-      sorter: (a, b) => a.time_str.localeCompare(b.time_str),
-      render: (v: string) => <Text type="secondary">{v}</Text>,
-    },
-    {
       title: "Actions",
       key: "actions",
       width: 360,
       render: (_, d) => {
+        const isProcessing = d.status === "IN_PROGRESS";
         const docFile = isDoc(d.name);
         const videoFile = isVideo(d.name);
 
-        const canDelete = d.in_vector_store === "yes" || d.is_root_blob === "yes";
+        const canDelete =
+          !isProcessing &&
+          (d.in_vector_store === "yes" || d.is_root_blob === "yes");
         const canDeleteFromStorage =
-          d.in_vector_store === "no" && d.is_root_blob === "no";
+          !isProcessing && d.in_vector_store === "no" && d.is_root_blob === "no";
+        const canMove =
+          !isProcessing && d.in_vector_store === "no" && docFile;
 
-        const canMove = d.in_vector_store === "no" && docFile;
+        if (isProcessing) {
+          return (
+            <Text type="secondary" italic>
+              Processing actions unavailable
+            </Text>
+          );
+        }
 
         return (
           <Space size="small" wrap>
@@ -231,8 +246,8 @@ const FilesTable: React.FC<FileTableProps> = ({
                 title="Delete record"
                 description={
                   videoFile
-                    ? "This removes the video record (and blob if it's root)."
-                    : "This removes the record (blob if it's root)."
+                    ? "Removes video record, index, and blob."
+                    : "Removes the record (blob if root)."
                 }
                 okText="Delete"
                 okButtonProps={{ danger: true }}
@@ -242,7 +257,8 @@ const FilesTable: React.FC<FileTableProps> = ({
                     collectionName,
                     d.name,
                     d.version_id,
-                    d.is_root_blob
+                    d.is_root_blob,
+                    d.vi_mongo_id // PASS THE ID HERE
                   )
                 }
               >
@@ -273,13 +289,13 @@ const FilesTable: React.FC<FileTableProps> = ({
                   type="dashed"
                   icon={<DeleteTwoTone twoToneColor="#ff4d4f" />}
                 >
-                  Delete From File Storage
+                  Delete Storage
                 </Button>
               </Popconfirm>
             )}
 
             {canMove && (
-              <Tooltip title="Add this document’s content to your vector store">
+              <Tooltip title="Add content to vector store">
                 <Button
                   type="primary"
                   icon={<CloudUploadOutlined />}
@@ -291,12 +307,6 @@ const FilesTable: React.FC<FileTableProps> = ({
                 </Button>
               </Tooltip>
             )}
-
-            {videoFile && d.in_vector_store === "no" && (
-              <Text type="secondary">
-                Video is indexed via Video Indexer, not vector store.
-              </Text>
-            )}
           </Space>
         );
       },
@@ -305,7 +315,6 @@ const FilesTable: React.FC<FileTableProps> = ({
 
   return (
     <div>
-      {/* Filter toolbar */}
       <Flex gap={12} align="center" wrap style={{ marginBottom: 12 }}>
         <Space size="small" align="center">
           <Text strong>Vectorized</Text>
@@ -345,9 +354,7 @@ const FilesTable: React.FC<FileTableProps> = ({
             allowEmpty={[true, true]}
             style={{ width: 280 }}
           />
-          {(vecFilter ||
-            rootFilter ||
-            (range && (range[0] || range[1]))) && (
+          {(vecFilter || rootFilter || (range && (range[0] || range[1]))) && (
             <Button
               onClick={() => {
                 setVecFilter("");

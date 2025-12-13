@@ -1,4 +1,7 @@
 from flask import Flask, request, jsonify
+import threading
+from bson import ObjectId
+from datetime import datetime
 import os
 from flask_cors import CORS
 from mongo_helper import (
@@ -51,7 +54,15 @@ from video_indexer_helper import (
     check_if_course_exist,
     insert_video_indexing_progress,
     index_video_and_update_metadata,
+    get_video_document_by_id,
+    delete_video_entry_from_db,
+    get_course_videos_manage,
+    VideoIndexerClient,
+    VideoDetails
 )
+
+from chat_helper import chat_client, ChatRequestBody
+
 from dotenv import load_dotenv
 from azure.storage.blob import BlobServiceClient
 from datetime import datetime
@@ -59,7 +70,7 @@ from pytz import timezone, utc
 import requests
 from course_share_helper import get_access_token
 
-from model import VideoDetails  # still used
+from model import VideoDetails 
 
 load_dotenv()
 
@@ -70,8 +81,6 @@ blob_service_client = BlobServiceClient.from_connection_string(
     os.environ.get("AZURE_CONN_STRING")
 )
 graph_url = "https://graph.microsoft.com/v1.0/"
-
-# NOTE: Removed BrokerService / legacy VI client; new VI logic is in video_indexer_helper
 
 @app.route("/vectorstore", methods=["PUT"])
 def storeInVectorStore():
@@ -266,47 +275,31 @@ def get_files(username, collection_name, domain_name):
 
 @app.route("/api/preview/<collection_name>/<domain_name>", methods=["GET"])
 def preview_file(collection_name, domain_name):
-    """
-    Preview a single file inside a course/domain.
-
-    Query params:
-      - name: the file name in that domain, e.g. "answer.txt"
-
-    Returns JSON:
-      For text files:
-        { "name": "...", "kind": "text", "content": "...." }
-
-      For videos / pdf / others:
-        { "name": "...", "kind": "video|pdf|other", "url": "<fresh SAS url>" }
-    """
-    TEXT_EXTS = {".txt"}
+    # Treat CSV, JSON, MD as text so we can read their content directly
+    TEXT_EXTS = {".txt", ".csv", ".md", ".json"} 
     VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
     PDF_EXTS = {".pdf"}
+    # for office docs
+    OFFICE_EXTS = {".docx", ".doc", ".pptx", ".ppt", ".xlsx"} 
 
     file_name = request.args.get("name")
     if not file_name:
         return jsonify({"error": "name query parameter is required"}), 400
 
-    # Your containers are "course_name" lowercased with spaces -> '-'
     container_name = collection_name.lower().replace(" ", "-")
     blob_path = f"{domain_name}/{file_name}"
-
     ext = os.path.splitext(file_name)[1].lower()
 
     try:
-        # --- TEXT PREVIEW (.txt) ---
+        # .txt, .csv 
         if ext in TEXT_EXTS:
             text = get_blob_text(container_name, blob_path)
-            return (
-                jsonify(
-                    {
-                        "name": file_name,
-                        "kind": "text",
-                        "content": text,
-                    }
-                ),
-                200,
-            )
+            return jsonify({
+                "name": file_name,
+                "kind": "text",
+                "content": text,
+            }), 200
+
         blob_url = build_blob_sas_url(container_name, blob_path)
 
         kind = "other"
@@ -314,17 +307,14 @@ def preview_file(collection_name, domain_name):
             kind = "video"
         elif ext in PDF_EXTS:
             kind = "pdf"
+        elif ext in OFFICE_EXTS:
+            kind = "office" 
 
-        return (
-            jsonify(
-                {
-                    "name": file_name,
-                    "kind": kind,
-                    "url": blob_url,
-                }
-            ),
-            200,
-        )
+        return jsonify({
+            "name": file_name,
+            "kind": kind,
+            "url": blob_url,
+        }), 200
 
     except Exception as e:
         print("preview_file error:", e)
@@ -335,7 +325,7 @@ def preview_file(collection_name, domain_name):
 def upload_blob(collection_name, domain_name, username):
     files = request.files.getlist("files")
     container_name = collection_name.lower().replace(" ", "-")
-    allowed_doc_exts = {".pdf", ".docx", ".txt", ".pptx"}
+    allowed_doc_exts = {".pdf", ".docx", ".txt", ".pptx", ".csv", ".xlsx"}
     allowed_video_exts = {".mp4", ".mov", ".avi", ".mkv"}
     allowed_extensions = allowed_doc_exts | allowed_video_exts
 
@@ -909,103 +899,149 @@ def vi_create_course():
             201,
         )
 
-
 @app.route("/vi/videos", methods=["POST"])
 def vi_upload_videos():
-    """
-    Accepts:
-    {
-      "courseCode": "CS1003",
-      "video": [
-        {
-          "video_name": "Lecture 1",
-          "base64_encoded_video": "data:video/mp4;base64,AAA....",
-          "video_description": "Week 1 intro"
-        },
-        ...
-      ]
-    }
-    """
     body = request.get_json(silent=True) or {}
     course_code = (body.get("courseCode") or "").strip()
     videos = body.get("video") or []
-    print(course_code)
-    print(videos)
 
     if not course_code:
         return jsonify({"error": "courseCode is required"}), 400
     if not isinstance(videos, list) or len(videos) == 0:
         return jsonify({"error": "video must be a non-empty list"}), 400
 
-    # Ensure course exists in the video-analyzer DB
     course_doc = check_if_course_exist(course_code)
-    print(course_doc)
     if not course_doc:
         return jsonify({"error": f"Course not found: {course_code}"}), 404
-
+    
     course_id = course_doc["_id"]
-    registered, errors = [], []
+    registered = []
+    errors = []
 
-    # Register + index each video
     for idx, v in enumerate(videos):
         name = (v.get("video_name") or "").strip()
         b64 = (v.get("base64_encoded_video") or "").strip()
         desc = (v.get("video_description") or "").strip()
+        user_email = (body.get("username") or "").strip()
 
         if not name or not b64:
-            errors.append(
-                {
-                    "index": idx,
-                    "error": "video_name and base64_encoded_video are required",
-                }
-            )
+            errors.append({"index": idx, "error": "Missing name or video data"})
             continue
 
         try:
-            # 1) Create Mongo stub with IN_PROGRESS
             vd = VideoDetails(video_name=name, video_description=desc, video_id="")
-            video_object_id = insert_video_indexing_progress(vd, course_id)
+            video_oid = insert_video_indexing_progress(vd, course_id)
 
-            # 2) Run Azure Video Indexer pipeline
-            try:
-                vi_video_id = index_video_and_update_metadata(
-                    course_doc=course_doc,
-                    video_object_id=video_object_id,
-                    video_name=name,
-                    base64_encoded_video=b64,
-                    video_description=desc,
-                )
-                registered.append(
-                    {
-                        "index": idx,
-                        "video_mongo_id": str(video_object_id),
-                        "video_indexer_id": vi_video_id,
-                        "video_name": name,
-                    }
-                )
-            except Exception as e:
-                errors.append(
-                    {
-                        "index": idx,
-                        "video_name": name,
-                        "error": f"Failed to index video in Azure Video Indexer: {str(e)}",
-                    }
-                )
-
-        except Exception as e:
-            errors.append(
-                {
-                    "index": idx,
+            t = threading.Thread(
+                target=index_video_and_update_metadata,
+                kwargs={
+                    "course_doc": course_doc,
+                    "video_object_id": video_oid,
                     "video_name": name,
-                    "error": f"Failed to register video metadata: {str(e)}",
+                    "base64_encoded_video": b64,
+                    "video_description": desc,
+                    "user_email": user_email
                 }
             )
+            t.start()
 
-    status_code = 201 if registered else 400
-    return (
-        jsonify({"courseCode": course_code, "registered": registered, "errors": errors}),
-        status_code,
-    )
+            registered.append({
+                "video_mongo_id": str(video_oid), 
+                "video_name": name,
+                "status": "IN_PROGRESS"
+            })
+
+        except Exception as e:
+            errors.append({"index": idx, "error": str(e)})
+
+    return jsonify({
+        "courseCode": course_code, 
+        "registered": registered, 
+        "errors": errors,
+        "message": "Uploads started in background."
+    }), 201
+
+@app.route("/api/vi/status/<course_code>", methods=["GET"])
+def get_video_statuses(course_code):
+    try:
+        all_courses = get_course_videos_manage(course_code)
+        if not all_courses:
+            return jsonify({}), 200
+
+        target_course = all_courses[0]
+        status_map = {}
+        for v in target_course.get("courseVideos", []):
+            name = v.get("videoName")
+            status = v.get("status")
+            vi_id = v.get("_id") # Internal VI Mongo ID
+            
+            if name:
+                status_map[name] = {
+                    "status": status,
+                    "vi_mongo_id": vi_id 
+                }
+
+        return jsonify(status_map), 200
+    except Exception as e:
+        print(f"Error fetching statuses: {e}")
+        return jsonify({}), 500
+
+@app.route("/api/vi/delete_video", methods=["DELETE"])
+def delete_video_indexer_entry():
+    """
+    Expects { "id": "VI_MONGO_ID" }
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        mongo_id = body.get("id")
+        if not mongo_id: return jsonify({"error": "ID required"}), 400
+
+        # 1. Look up doc to find External Azure ID
+        doc = get_video_document_by_id(mongo_id)
+        if doc and doc.get("video_id"):
+            try:
+                # 2. Delete from Azure
+                VideoIndexerClient().delete_video(doc.get("video_id"))
+            except Exception as e:
+                print(f"Azure Delete Warning: {e}")
+
+        # 3. Delete from VI MongoDB
+        if delete_video_entry_from_db(mongo_id):
+            return jsonify({"message": "Deleted successfully"}), 200
+        else:
+            return jsonify({"error": "Database deletion failed"}), 500
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+@app.route("/chat/<video_id>", methods=["POST"])
+def chat_with_video(video_id):
+    """
+    Endpoint to chat with a specific video's knowledge base.
+    Expects JSON body: { "message": "...", "previous_messages": [...] }
+    """
+    try:
+        # 1. Get JSON data from Flask
+        data = request.get_json()
+        
+        # 2. Validate and Parse using the Pydantic model from chat_helper
+        # This automatically converts the list of dicts into ChatHistory objects
+        body = ChatRequestBody(**data) 
+        
+        # 3. Call the helper function
+        # We pass the cleaned Pydantic objects to the helper
+        answer = chat_client.generate_response(
+            video_id=video_id, 
+            message=body.message, 
+            previous_messages=body.previous_messages
+        )
+        
+        return jsonify({"answer": answer}), 200
+
+    except Exception as e:
+        print(f"Chat error for video {video_id}: {e}")
+        # If Pydantic validation fails, it usually raises a ValidationError
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

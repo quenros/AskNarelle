@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { Suspense } from "react";
-import { useSearchParams } from "next/navigation";
 import { PublicClientApplication } from "@azure/msal-browser";
 import { msalConfig } from "@/authConfig";
 
@@ -20,9 +19,7 @@ import {
   Space,
   Button,
   Input,
-  Empty,
   Spin,
-  App,
   Flex,
 } from "antd";
 import {
@@ -31,7 +28,8 @@ import {
   FolderOpenOutlined,
 } from "@ant-design/icons";
 
-interface Document {
+// 1. UPDATE INTERFACE: Add vi_mongo_id and keep status as string
+export interface Document {
   _id: string;
   name: string;
   url: string;
@@ -43,6 +41,8 @@ interface Document {
   in_vector_store: string;
   is_root_blob: string;
   course_name: string;
+  status?: string;      // Should be string: "IN_PROGRESS"
+  vi_mongo_id?: string; // New field for the deletion ID
 }
 
 const { Title, Text } = Typography;
@@ -68,11 +68,13 @@ function Fileslist({
   const [showMovementPopup, setShowMovementPopup] = useState<boolean>(false);
   const [showBlobDeletionPopup, setShowBlobDeletionPopup] = useState<boolean>(false);
 
+  // Selected File State
   const [selectedFileName, setSelectedFileName] = useState<string>("");
   const [selectedCollection, setSelectedCollection] = useState<string>("");
   const [selectedDocId, setSelectedDocId] = useState<string>("");
   const [selectedVersionId, setSelectedVersionId] = useState<string>("");
   const [selectedIsRootBlob, setSelectedIsRootBlob] = useState<string>("");
+  const [selectedViId, setSelectedViId] = useState<string | undefined>(undefined);
 
   const [authorised, setAuthorised] = useState<boolean>(true);
   const [coursePresent, setCoursePresent] = useState<boolean>(true);
@@ -83,36 +85,34 @@ function Fileslist({
   const accounts = msalInstance.getAllAccounts();
   const username = accounts?.[0]?.username ?? "";
 
-  // Actions that toggle fetch refresh
   const onFileCreated = () => setToggleCreated((v) => !v);
   const onFileDeleted = () => setToggleDeleted((v) => !v);
   const onFileMoved = () => setToggleMoved((v) => !v);
   const onBlobDeleted = () => setToggleBlobDeleted((v) => !v);
 
-  // Button handlers
   const openUploadModal = () => setShowUploadModal(true);
   const closeUploadModal = () => setShowUploadModal(false);
 
+  // Updated Handler to accept vi_mongo_id
   const handlePressDelete = (
-    id: string,
-    collection: string,
-    file: string,
-    version_id: string,
-    is_root_blob: string
+    id: string, 
+    collection: string, 
+    file: string, 
+    version_id: string, 
+    is_root_blob: string,
+    vi_mongo_id?: string // Accept the ID from the table
   ) => {
     setSelectedFileName(file);
     setSelectedCollection(collection);
     setSelectedDocId(id);
     setSelectedVersionId(version_id);
     setSelectedIsRootBlob(is_root_blob);
+    setSelectedViId(vi_mongo_id); // Set it to state
     setShowDeletionPopup(true);
   };
 
   const handlePressMovement = (
-    id: string,
-    collection: string,
-    file: string,
-    version_id: string
+    id: string, collection: string, file: string, version_id: string
   ) => {
     setSelectedFileName(file);
     setSelectedCollection(collection);
@@ -122,11 +122,7 @@ function Fileslist({
   };
 
   const handlePressBlobDelete = (
-    id: string,
-    collection: string,
-    file: string,
-    version_id: string,
-    is_root_blob: string
+    id: string, collection: string, file: string, version_id: string, is_root_blob: string
   ) => {
     setSelectedFileName(file);
     setSelectedCollection(collection);
@@ -140,52 +136,71 @@ function Fileslist({
   const closeMovementPopup = () => setShowMovementPopup(false);
   const closeBlobDeletionPopup = () => setShowBlobDeletionPopup(false);
 
-  // Fetch
-  useEffect(() => {
-    let abort = false;
-    setLoading(true);
-    fetch(
-      `http://localhost:5000/api/collections/${username}/${collectionName}/${domainName}`
-    )
-      .then((response) => {
-        if (abort) return null;
-        if (response.status === 403) {
-          setAuthorised(false);
-          setDocuments([]);
-          return null;
-        } else if (response.status === 404) {
-          setCoursePresent(false);
-          setDocuments([]);
-          return null;
-        } else if (response.status === 500) {
-          throw new Error("Failed to fetch course documents");
-        } else {
-          return response.json();
+  // -------------------------------------------------------------------
+  // 1. Reusable Fetch Function (UPDATED)
+  // -------------------------------------------------------------------
+  const fetchDocs = useCallback(async (isPolling = false) => {
+    if (!isPolling) setLoading(true);
+
+    try {
+      const docRes = await fetch(
+        `http://localhost:5000/api/collections/${username}/${collectionName}/${domainName}`
+      );
+      
+      if (docRes.status === 403) { setAuthorised(false); setDocuments([]); return; }
+      if (docRes.status === 404) { setCoursePresent(false); setDocuments([]); return; }
+      if (!docRes.ok) throw new Error("Failed to fetch docs");
+
+      const docs: Document[] = await docRes.json();
+
+      // Fetch Video Statuses
+      const statusRes = await fetch(`http://localhost:5000/api/vi/status/${collectionName}`);
+      
+      // Define the type of the response map
+      type StatusInfo = { status: string; vi_mongo_id: string };
+      const statusMap: Record<string, StatusInfo> = statusRes.ok ? await statusRes.json() : {};
+
+      // Merge Logic - FLATTEN THE OBJECT
+      const mergedDocs = docs.map((doc) => {
+        const videoInfo = statusMap[doc.name];
+        
+        if (videoInfo) {
+          return { 
+            ...doc, 
+            status: videoInfo.status,        // Assign string to status
+            vi_mongo_id: videoInfo.vi_mongo_id // Assign string to new field
+          };
         }
-      })
-      .then((docs: Document[] | null) => {
-        if (abort || !docs) return;
-        setDocuments(docs);
-      })
-      .catch((err) => {
-        console.error("Error fetching documents:", err);
-      })
-      .finally(() => {
-        if (!abort) setLoading(false);
+        return doc;
       });
 
-    return () => {
-      abort = true;
-    };
-  }, [
-    toggleCreated,
-    toggleDeleted,
-    toggleMoved,
-    toggleBlobDeleted,
-    collectionName,
-    domainName,
-    username,
-  ]);
+      setDocuments(mergedDocs);
+
+    } catch (err) {
+      console.error("Error fetching data:", err);
+    } finally {
+      if (!isPolling) setLoading(false);
+    }
+  }, [username, collectionName, domainName]);
+
+  useEffect(() => {
+    fetchDocs(false);
+  }, [fetchDocs, toggleCreated, toggleDeleted, toggleMoved, toggleBlobDeleted]);
+
+  // -------------------------------------------------------------------
+  // 3. Polling Logic
+  // -------------------------------------------------------------------
+  useEffect(() => {
+    // This check now works because d.status is a string again
+    const hasInProgress = documents.some((d) => d.status === "IN_PROGRESS");
+    
+    if (hasInProgress) {
+      const intervalId = setInterval(() => {
+        fetchDocs(true); 
+      }, 5000);
+      return () => clearInterval(intervalId);
+    }
+  }, [documents, fetchDocs]);
 
   const filteredFiles = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -193,14 +208,12 @@ function Fileslist({
     return documents.filter((d) => d?.name?.toLowerCase().includes(q));
   }, [searchQuery, documents]);
 
-  // Render gates for 404/403
   if (!coursePresent) return <NotFoundPage />;
   if (!authorised) return <ForbiddenPage />;
 
   return (
     <main className="min-h-screen bg-gray-100 pt-12 md:pt-16">
       <div className="mx-auto max-w-6xl px-4 py-8 sm:py-12">
-        {/* Header row */}
         <Flex justify="space-between" align="center" wrap>
           <Title level={3} style={{ margin: 0 }}>
             {collectionName}
@@ -217,7 +230,6 @@ function Fileslist({
           )}
         </Flex>
 
-        {/* Search */}
         {documents.length > 0 && (
           <div style={{ marginTop: 16 }}>
             <Input
@@ -231,7 +243,6 @@ function Fileslist({
           </div>
         )}
 
-        {/* Content */}
         <div style={{ marginTop: 16 }}>
           {loading ? (
             <Flex align="center" justify="center" style={{ minHeight: 240 }}>
@@ -268,7 +279,6 @@ function Fileslist({
         </div>
       </div>
 
-      {/* Modals / Popups */}
       {showUploadModal && (
         <DocumentPopup
           onClose={closeUploadModal}
@@ -293,9 +303,12 @@ function Fileslist({
           version_id={selectedVersionId}
           is_root_blob={selectedIsRootBlob}
           username={username}
+          vi_mongo_id={selectedViId} // Pass the ID to the popup
         />
       )}
 
+      {/* ... Other Popups remain unchanged ... */}
+      
       {showMovementPopup && (
         <FileMovementPopup
           fileName={selectedFileName}

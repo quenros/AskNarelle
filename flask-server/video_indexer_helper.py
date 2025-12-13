@@ -1,54 +1,70 @@
-from pymongo import MongoClient
 import os
-from dotenv import load_dotenv
-from bson import ObjectId
-from datetime import datetime, timedelta
-import calendar
-
-from enum import Enum
-from typing import Dict, List, Any, Optional
-import base64
 import io
 import time
+import base64
 import logging
-
 import requests
+import schedule
+import threading
+from typing import Dict, List, Any, Optional
+from enum import Enum
 
-from model import CourseDetails, VideoDetails, Consts
-
+from dotenv import load_dotenv
+from pymongo import MongoClient
+from bson import ObjectId
 from azure.identity import DefaultAzureCredential
-from typing import Protocol
+from datetime import datetime
+
+from model import CourseDetails, VideoDetails
+
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-mongo_uri = os.environ.get('MONGO_URI')
-print(mongo_uri)
+# --------------------------------------------------------------------------
+# 1. Configuration Wrapper
+# --------------------------------------------------------------------------
+class VIConsts:
+    """Wrapper for Environment Variables to keep the Client clean."""
+    def __init__(self):
+        self.SubscriptionId = os.environ.get("VIDEO_INDEXER_SUBSCRIPTION_ID")
+        self.ResourceGroup = os.environ.get("VIDEO_INDEXER_RESOURCE_GROUP")
+        self.AccountName = os.environ.get("VIDEO_INDEXER_ACCOUNT_NAME")
+        self.AccountId = os.environ.get("VIDEO_INDEXER_ACCOUNT_ID")
+        self.ApiVersion = os.environ.get("VIDEO_INDEXER_API_VERSION", "2022-08-01")
+        self.ApiEndpoint = "https://api.videoindexer.ai"
+        self.AzureResourceManager = "https://management.azure.com"
+        self.Location = os.environ.get("VIDEO_INDEXER_LOCATION", "trial")
 
+# --------------------------------------------------------------------------
+# 2. Database Setup & Models
+# --------------------------------------------------------------------------
+mongo_uri = os.environ.get('MONGO_URI')
 client = MongoClient(mongo_uri)
 
-# Video analyzer DB (Cosmos for Mongo vCore)
 vi_db = client['videoindexer']
 vi_courses = vi_db['course']
 vi_videos = vi_db['video']
 vi_raw = vi_db.get_collection("video_indexer_raw")
-vi_prompts = vi_db.get_collection("prompt_content_raw")
 
-# Call once on startup (e.g., from app.py) to enforce uniqueness
+class Status(str, Enum):
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    ERROR = "ERROR"
+
 def vi_ensure_indexes():
-    # Uniqueness for course code
     vi_courses.create_index("course_code", unique=True)
-    # Lookups for course and video indexer ids.
     vi_videos.create_index("course_reference_id")
-    vi_videos.create_index("video_id")
+
+# --------------------------------------------------------------------------
+# 3. Database Helper Functions
+# --------------------------------------------------------------------------
 
 def vi_add_course(course_code: str, course_name: str, description: str, owner_username: str):
-    """
-    Adds a course record used by the video analyzer project.
-    Schema mirrors their expectations:
-      { courseCode, courseName, description, owners:[...], createdAt }
-    """
     course_code = (course_code or "")
     course_name = (course_name or "")
     description = (description or "")
@@ -62,78 +78,59 @@ def vi_add_course(course_code: str, course_name: str, description: str, owner_us
         "course_name": course_name,
         "course_description": description,
         "owners": [owner_username] if owner_username else [],
-        # "createdAt": datetime.utcnow().isoformat() + "Z",
     }
     vi_courses.insert_one(doc)
     return True
 
-def vi_get_courses():
-    """Return all video-analyzer courses."""
-    out = []
-    for c in vi_courses.find({}, {"_id": 0}):
-        out.append(c)
-    return out
+#  Getter Function for status of video indexing.
+def get_course_videos_manage(course_code: Optional[str] = None):
+    query = {}
+    if course_code:
+        query["course_code"] = course_code
 
-def vi_get_course_by_code(course_code: str):
-    return vi_courses.find_one({"course_code": course_code}, {"_id": 0})
-
-def vi_add_owner(course_code: str, username: str):
-    username = username.lower()
-    vi_courses.update_one(
-        {"course_code": course_code},
-        {"$addToSet": {"owners": username}}
-    )
-
-def vi_update_course_details(course_details: CourseDetails):
-    filter_query = {"course_code": course_details.course_id}
-    course_update = {
-        "course_name": course_details.course_name,
-        "course_description": course_details.course_description
-    }
-    result = vi_courses.update_one(filter_query, {"$set": course_update})
-    return result.matched_count > 0
+    result = []
+    cursor = vi_courses.find(query)
+    
+    for course in cursor:
+        course_data = {
+            "courseName": course.get("course_name"),
+            "courseCode": course.get("course_code"),
+            "visibility": course.get("visibility")
+        }
+        
+        video_ids = course.get("videos", [])
+        videos = vi_videos.find({"_id": {"$in": video_ids}})
+        
+        video_list = []
+        for v in videos:
+            video_list.append({
+                "videoName": v.get("name", ""),
+                "summary": v.get("video_description", ""),
+                "videoId": v.get("video_id", ""), 
+                "thumbnail": v.get("thumbnail", ""),
+                "visibility": v.get("visibility", ""),
+                "status": v.get("status", ""),
+                "_id": str(v.get("_id")) 
+            })
+            
+        course_data["courseVideos"] = video_list
+        result.append(course_data)
+        
+    return result
 
 def check_if_course_exist(course_code: str):
-    """
-    Returns the course document.
-    """
     doc = vi_courses.find_one({"course_code": course_code})
     return doc or {}
 
-def update_visibility_option_course(course_id, visibility):
-    filter_query = {"course_code": course_id}
-    visibility_update = {"visibility": visibility}
-    result = vi_courses.update_one(filter_query, {"$set": visibility_update})
-    if result.matched_count > 0:
-        print("Course Document Visibility updated successfully.")
-        return result.upserted_id
-    else:
-        print("No matching document found.")
-        return 0
-
-class Status(str, Enum):
-    IN_PROGRESS = "IN_PROGRESS"
-    COMPLETED   = "COMPLETED"
-    ERROR       = "ERROR"
-
 def insert_video_indexing_progress(video: VideoDetails, course_id: ObjectId):
-    """
-    Insert Video to Video Collection and update Course with video ID.
-
-    Args:
-        video (VideoDetails): Contains video_name, video_description, etc.
-        course_id (ObjectId): Object ID of Course. Required.
-
-    Returns:
-        ObjectId: video Mongo _id
-    """
+    """Creates the initial DB record with IN_PROGRESS status."""
     doc = {
         "name": video.video_name,
         "status": Status.IN_PROGRESS.value,
         "course_reference_id": course_id,
         "video_description": video.video_description,
-        # "video_id" (from VI) and "thumbnail" come later
         "visibility": "PRIVATE",
+        "created_at": datetime.now()
     }
     video_id = vi_videos.insert_one(doc).inserted_id
 
@@ -146,519 +143,324 @@ def insert_video_indexing_progress(video: VideoDetails, course_id: ObjectId):
 
 def update_video_id_thumbnail(video_object_id: ObjectId, video_id: str, video_thumbnail: str):
     filter_query = {"_id": video_object_id}
-
     new_fields = {
-        "video_id": video_id,
-        "thumbnail": "data:image/jpeg;base64," + video_thumbnail
+        "video_id": video_id, # The Azure External ID
+        "thumbnail": "data:image/jpeg;base64," + video_thumbnail if video_thumbnail else ""
     }
-    result = vi_videos.update_one(filter_query, {"$set": new_fields})
-    if result.matched_count > 0:
-        print("Video Document Thumbnail updated successfully.")
-    else:
-        print("No matching Video Document found.")
+    vi_videos.update_one(filter_query, {"$set": new_fields})
 
 def change_video_status(video_object_id: ObjectId, status_new: Status):
-    filter_query = {"_id": video_object_id}
+    vi_videos.update_one(
+        {"_id": video_object_id}, 
+        {"$set": {"status": status_new.value}}
+    )
 
-    new_fields = {
-        "status": status_new.value,
-        "visibility": "PRIVATE"
-    }
-    result = vi_videos.update_one(filter_query, {"$set": new_fields})
-    if result.matched_count > 0:
-        return "Video Status updated successfully for ID: " + str(video_object_id)
-    else:
-        return "No matching document found for ID: " + str(video_object_id)
+def get_video_document_by_id(video_mongo_id: str):
+    try:
+        return vi_videos.find_one({"_id": ObjectId(video_mongo_id)})
+    except:
+        return None
 
-def update_video_details(video: VideoDetails):
-    filter_query = {"video_id": video.video_id}
-    video_update = {"name": video.video_name, "summary": video.video_description}
-    result = vi_videos.update_one(filter_query, {"$set": video_update})
-    if result.matched_count > 0:
-        print("Video Document updated successfully for Video ID: ", video.video_id)
+def delete_video_entry_from_db(video_mongo_id: str):
+    """Removes video from Video collection and Course reference."""
+    try:
+        vid_oid = ObjectId(video_mongo_id)
+        video_doc = vi_videos.find_one({"_id": vid_oid})
+        if not video_doc: return False
+        
+        course_ref_id = video_doc.get("course_reference_id")
+        if course_ref_id:
+            vi_courses.update_one({"_id": course_ref_id}, {"$pull": {"videos": vid_oid}})
+        
+        vi_videos.delete_one({"_id": vid_oid})
         return True
-    else:
-        print("No Video Document found for Video Code: ", video.video_id)
+    except Exception as e:
+        logger.error(f"Error deleting video DB entry: {e}")
         return False
 
-def get_course_videos():
-    course_video_result = []
-    # TODO: Filter based on visibility
-    result = vi_courses.find({'visibility': 'PUBLIC'})
+# --------------------------------------------------------------------------
+# 4. Robust Video Indexer Client
+# --------------------------------------------------------------------------
+class VideoIndexerClient:
+    _instance = None 
 
-    for course in result:
-        course_video_dict = {
-            "courseName": course.get("course_name"),
-            "courseCode": course.get("course_code"),
-            "visibility": course.get("visibility")
-        }
-        course_videos = []
-        # Only PUBLIC & COMPLETED videos
-        video_result = vi_videos.find({
-            '_id': {'$in': course.get("videos", [])},
-            'status': 'COMPLETED',
-            'visibility': 'PUBLIC'
-        })
-        for video in video_result:
-            course_videos.append({
-                "videoName": video.get("name", ""),
-                "summary": video.get("video_description", ""),
-                "videoId": video.get("video_id", ""),
-                "thumbnail": video.get("thumbnail", ""),
-                "visibility": video.get("visibility", ""),
-                "status": video.get("status", "")
-            })
-        course_video_dict["courseVideos"] = course_videos
-        course_video_result.append(course_video_dict)
+    def __new__(cls):
+        """Singleton Pattern to ensure one scheduler per app."""
+        if cls._instance is None:
+            cls._instance = super(VideoIndexerClient, cls).__new__(cls)
+            cls._instance.initialized = False
+        return cls._instance
 
-    return course_video_result
+    def __init__(self) -> None:
+        if self.initialized: return
+        
+        self.consts = VIConsts()
+        self.arm_access_token = ''
+        self.vi_access_token = ''
+        self.account = None
+        self.initialized = True
+        
+        # Initial Auth & Start Scheduler
+        self.authenticate_async()
+        self.start_authentication_scheduler()
 
-def get_course_videos_manage():
-    course_video_result = []
-    result = vi_courses.find()
-    for course in result:
-        course_video_dict = {
-            "courseName": course.get("course_name"),
-            "courseCode": course.get("course_code"),
-            "visibility": course.get("visibility")
-        }
-        course_videos = []
-        video_result = vi_videos.find({
-            '_id': {'$in': course.get("videos", [])}
-        })
-        for video in video_result:
-            course_videos.append({
-                "videoName": video.get("name", ""),
-                "summary": video.get("video_description", ""),
-                "videoId": video.get("video_id", ""),
-                "thumbnail": video.get("thumbnail", ""),
-                "visibility": video.get("visibility", ""),
-                "status": video.get("status", "")
-            })
-        course_video_dict["courseVideos"] = course_videos
-        course_video_result.append(course_video_dict)
-
-    return course_video_result
-
-class VideoIndexerRepositoryService:
-    """
-    Lightweight repo over your existing Mongo collections:
-      - vi_raw: stores raw insights from Azure Video Indexer
-      - vi_prompts: stores prompt / context (if you choose to)
-    """
-    def __init__(self):
-        self.video_indexer_raw_collection = vi_raw
-        self.prompt_content_raw_collection = vi_prompts
-
-    def insert_video_index_raw(self, document: Dict[str, Any]) -> None:
-        self.video_indexer_raw_collection.insert_one(document)
-
-    def insert_prompt_content_raw(self, result: Dict[str, Any], video_id: str) -> None:
-        self.prompt_content_raw_collection.insert_one({
-            "video_indexer_id": video_id,
-            "raw": result
-        })
-
-    def insert_prompt_context_index(self, result: Dict[str, Any], video_id: str) -> None:
-        # For now, we just store it as another doc in same collection.
-        # You can split to a separate collection later if needed.
-        self.prompt_content_raw_collection.insert_one({
-            "video_indexer_id": video_id,
-            "context_index": result
-        })
-
-class SimpleVideoIndexerClient:
-    """
-    Minimal Azure Video Indexer client using Azure AD (service principal) + ARM
-    `generateAccessToken` to get short-lived Video Indexer access tokens.
-
-    Flow:
-      1. Use a service principal (tenant/client ID/secret) to get an ARM token.
-      2. Call the Video Indexer ARM resource's `generateAccessToken` endpoint.
-      3. Use the returned account/video access token with the public Video Indexer API.
-
-    Required environment variables:
-
-      # Video Indexer account / region
-      VIDEO_INDEXER_LOCATION          # e.g. "southeastasia" or "trial"
-      VIDEO_INDEXER_ACCOUNT_ID        # Video Indexer account GUID (used in /Accounts/{accountId}/Videos)
-
-      # ARM resource identifiers for the Video Indexer account
-      VIDEO_INDEXER_SUBSCRIPTION_ID   # Azure subscription containing the VI resource
-      VIDEO_INDEXER_RESOURCE_GROUP    # Resource group name of the VI account
-      VIDEO_INDEXER_ACCOUNT_NAME      # ARM resource name of the VI account (often same as portal name)
-      VIDEO_INDEXER_API_VERSION       # Optional, defaults to "2022-08-01"
-
-      # Azure AD service principal used to call ARM
-      AZURE_TENANT_ID                 # AAD tenant ID
-      AZURE_CLIENT_ID                 # AAD app (service principal) client ID
-      AZURE_CLIENT_SECRET             # AAD app client secret
-    """
-
-    def __init__(self):
-        # Region + account id used by the public VI API
-        self.location = os.environ.get("VIDEO_INDEXER_LOCATION", "trial")
-        self.account_id = os.environ["VIDEO_INDEXER_ACCOUNT_ID"]
-
-        # ARM resource identifiers for the Video Indexer account
-        self.subscription_id = os.environ["VIDEO_INDEXER_SUBSCRIPTION_ID"]
-        self.resource_group = os.environ["VIDEO_INDEXER_RESOURCE_GROUP"]
-        self.account_name = os.environ.get("VIDEO_INDEXER_ACCOUNT_NAME", self.account_id)
-        self.api_version = os.environ.get("VIDEO_INDEXER_API_VERSION", "2022-08-01")
-
-        # If you ever want to switch back to service principal manually,
-        # you can still keep these env vars; they are not used by the
-        # DefaultAzureCredential-based flow below.
-        self.tenant_id = os.environ.get("AZURE_TENANT_ID")
-        self.client_id = os.environ.get("AZURE_CLIENT_ID")
-        self.client_secret = os.environ.get("AZURE_CLIENT_SECRET")
-
-    # ----- internal helpers -----
-
-    def _get_arm_access_token(self) -> str:
-        """
-        Get an Azure Resource Manager (ARM) access token using DefaultAzureCredential.
-
-        This will try: env vars / managed identity / VS Code / Azure CLI, etc.
-        Make sure `az login` works in local dev or configure identity in Azure.
-        """
-        scope = "https://management.azure.com/.default"
+    # --- Auth Logic ---
+    def _get_arm_access_token(self):
         credential = DefaultAzureCredential()
-
-        try:
-            token = credential.get_token(scope)
-        except Exception as e:
-            msg = (
-                f"Failed to acquire ARM token via DefaultAzureCredential for scope '{scope}': {e}"
-            )
-            print(msg)
-            raise RuntimeError(msg) from e
-
-        if not token or not token.token:
-            msg = "DefaultAzureCredential returned no token or an empty token."
-            print(msg)
-            raise RuntimeError(msg)
-
-        print(
-            f"[ARM] Acquired token via DefaultAzureCredential "
-            f"(expires_on={token.expires_on}, scope={scope})"
-        )
+        scope = "https://management.azure.com/.default"
+        token = credential.get_token(scope)
         return token.token
 
-    def get_account_access_token_async(
-        self,
-        permission_type: str = "Contributor",
-        scope: str = "Account",
-        video_id: Optional[str] = None,
-    ) -> str:
-        """
-        Get a Video Indexer access token via the ARM generateAccessToken endpoint.
-
-        permission_type: e.g. "Reader", "Contributor"
-        scope:           "Account" or "Video"
-        video_id:        required only when scope == "Video"
-        """
-        # Step 1: get ARM token (will raise RuntimeError with details if it fails)
-        arm_access_token = self._get_arm_access_token()
-        print("[VI] Obtained ARM token successfully.")
-
-        headers = {
-            "Authorization": f"Bearer {arm_access_token}",
-            "Content-Type": "application/json",
-        }
-
+    def _get_account_access_token(self, permission="Contributor", scope="Account", video_id=None):
+        headers = {"Authorization": f"Bearer {self.arm_access_token}"}
         url = (
-            f"https://management.azure.com/subscriptions/{self.subscription_id}"
-            f"/resourceGroups/{self.resource_group}"
-            f"/providers/Microsoft.VideoIndexer/accounts/{self.account_name}"
-            f"/generateAccessToken?api-version={self.api_version}"
+            f"{self.consts.AzureResourceManager}/subscriptions/{self.consts.SubscriptionId}"
+            f"/resourceGroups/{self.consts.ResourceGroup}"
+            f"/providers/Microsoft.VideoIndexer/accounts/{self.consts.AccountName}"
+            f"/generateAccessToken?api-version={self.consts.ApiVersion}"
         )
-
-        body: dict = {
-            "permissionType": permission_type,
-            "scope": scope,
-        }
-        if scope == "Video" and video_id is not None:
-            body["videoId"] = video_id
-
-        try:
-            resp = requests.post(url, json=body, headers=headers, timeout=10)
-        except requests.exceptions.RequestException as e:
-            msg = (
-                f"Error calling Video Indexer generateAccessToken: {e}. "
-                "Check subscription/resourceGroup/accountName/API version."
-            )
-            print(msg)
-            raise RuntimeError(msg) from e
-
-        try:
-            resp.raise_for_status()
-        except requests.exceptions.HTTPError as e:
-            msg = (
-                f"generateAccessToken failed (HTTP {resp.status_code}). "
-                f"Response: {resp.text}"
-            )
-            print(msg)
-            raise RuntimeError(msg) from e
-
-        try:
-            payload = resp.json()
-        except ValueError as e:
-            msg = f"generateAccessToken response is not valid JSON: {resp.text}"
-            print(msg)
-            raise RuntimeError(msg) from e
-
-        token = payload.get("accessToken")
-        if not token:
-            msg = (
-                "generateAccessToken response missing 'accessToken' field. "
-                f"Full payload: {payload}"
-            )
-            print(msg)
-            raise RuntimeError(msg)
-
-        return token
-
-
-    def upload_video(
-        self,
-        media: io.BytesIO,
-        video_name: str,
-        description: str = "",
-        excluded_ai: list | None = None,
-    ) -> str:
-        if excluded_ai is None:
-            excluded_ai = []
-
-        token = self.get_account_access_token_async()
-        print("token:")
-        print(token)
-
-        params: dict[str, str] = {
-            "accessToken": token,
-            "name": video_name[:80],
-            "description": description or "",
-            "privacy": "Private",
-        }
-        if excluded_ai:
-            params["excludedAI"] = ",".join(excluded_ai)
-
-        url = f"https://api.videoindexer.ai/{self.location}/Accounts/{self.account_id}/Videos"
-
-        files = {
-            "file": (video_name, media, "video/mp4"),
-        }
-
-        resp = requests.post(url, params=params, files=files)
-        print(resp)
-
-        if not resp.ok:
-            try:
-                print("Video Indexer upload failed:")
-                print("Status:", resp.status_code)
-                print("Response text:", resp.text)
-            except Exception:
-                pass
-
-            # Raise a clearer error that your pipeline can catch
-            raise requests.HTTPError(
-                f"Video Indexer upload failed ({resp.status_code}): {resp.text}",
-                response=resp,
-            )
-
-        try:
-            data = resp.json()
-        except Exception:
-            raise RuntimeError(
-                f"Video Indexer upload succeeded but response JSON could not be parsed: {resp.text}"
-            )
-
-        vi_video_id = data.get("id")
-        if not vi_video_id:
-            raise RuntimeError(
-                f"Video Indexer upload response missing 'id': {data}"
-            )
-
-        return vi_video_id
-
-    def wait_for_index(
-        self,
-        video_id: str,
-        language: str = "English",
-        timeout_sec: Optional[int] = 900,
-    ) -> Dict[str, Any]:
-        """
-        Polls Video Indexer until the video is processed or failed,
-        then returns the full index JSON.
-        """
-        token = self._get_arm_access_token(allow_edit=False)
-        url = f"{self.api_endpoint}/{self.location}/Accounts/{self.account_id}/Videos/{video_id}/Index"
-        params = {"accessToken": token, "language": language}
-
-        start = time.time()
-        while True:
-            resp = requests.get(url, params=params, timeout=60)
-            resp.raise_for_status()
-            result = resp.json()
-            state = result.get("state")
-
-            logger.info(f"Video Indexer state for {video_id}: {state}")
-
-            if state == "Processed":
-                return result
-            if state == "Failed":
-                raise RuntimeError(f"Video indexing failed for video_id={video_id}: {result}")
-
-            if timeout_sec is not None and (time.time() - start) > timeout_sec:
-                raise TimeoutError(f"Timed out waiting for Video Indexer to process video_id={video_id}")
-
-            time.sleep(10)
-
-    def get_video_index(self, video_id: str, language: str = "English") -> Dict[str, Any]:
-        """
-        Single-shot get index (without waiting).
-        """
-        token = self._get_arm_access_token(allow_edit=False)
-        url = f"{self.api_endpoint}/{self.location}/Accounts/{self.account_id}/Videos/{video_id}/Index"
-        params = {"accessToken": token, "language": language}
-        resp = requests.get(url, params=params, timeout=60)
+        body = {"permissionType": permission, "scope": scope}
+        if video_id: body["videoId"] = video_id
+        
+        resp = requests.post(url, json=body, headers=headers)
         resp.raise_for_status()
-        return resp.json()
+        return resp.json().get("accessToken")
 
-    def get_video_thumbnail(self, video_id: str, thumbnail_id: str) -> str:
-        """
-        Returns base64-encoded thumbnail image data.
-        """
-        token = self._get_arm_access_token(allow_edit=True)
+    def authenticate_async(self) -> None:
+        try:
+            self.arm_access_token = self._get_arm_access_token()
+            self.vi_access_token = self._get_account_access_token()
+            logger.info("Video Indexer Tokens refreshed successfully.")
+        except Exception as e:
+            logger.error(f"Failed to refresh tokens: {e}")
+
+    def schedule_authentication(self):
+        # Refresh tokens every 50 minutes (Tokens expire in 60 mins)
+        schedule.every(50).minutes.do(self.authenticate_async)
+        while True:
+            schedule.run_pending()
+            time.sleep(30)
+
+    def start_authentication_scheduler(self) -> None:
+        scheduler_thread = threading.Thread(target=self.schedule_authentication, daemon=True)
+        scheduler_thread.start()
+
+    def get_account_async(self) -> None:
+        if self.account is not None: return self.account
+        
+        headers = {"Authorization": f"Bearer {self.arm_access_token}"}
         url = (
-            f"{self.api_endpoint}/{self.location}/Accounts/{self.account_id}/"
+            f"{self.consts.AzureResourceManager}/subscriptions/{self.consts.SubscriptionId}"
+            f"/resourceGroups/{self.consts.ResourceGroup}"
+            f"/providers/Microsoft.VideoIndexer/accounts/{self.consts.AccountName}"
+            f"?api-version={self.consts.ApiVersion}"
+        )
+        resp = requests.get(url, headers=headers)
+        resp.raise_for_status()
+        self.account = resp.json()
+        return self.account
+
+    # --- Core API Operations ---
+
+    def file_upload_async(self, media: io.BytesIO, video_name: str, video_description: str = '', 
+                          excluded_ai: list = None, privacy='Private') -> str:
+        if excluded_ai is None: excluded_ai = []
+        
+        self.get_account_async() 
+        loc = self.account["location"]
+        acc_id = self.account["properties"]["accountId"]
+
+        url = f"{self.consts.ApiEndpoint}/{loc}/Accounts/{acc_id}/Videos"
+        params = {
+            'accessToken': self.vi_access_token,
+            'name': video_name[:80],
+            'description': video_description,
+            'privacy': privacy,
+            'indexingPreset': 'Default'
+        }
+        if excluded_ai: params['excludedAI'] = ','.join(excluded_ai)
+
+        resp = requests.post(url, params=params, files={'file': (video_name, media, 'video/mp4')})
+        resp.raise_for_status()
+        return resp.json().get('id')
+
+    def wait_for_index_async(self, video_id: str, timeout_sec: int = 1200) -> Dict:
+        """Blocks and polls until processing is done. Safe for background threads."""
+        self.get_account_async()
+        loc = self.account["location"]
+        acc_id = self.account["properties"]["accountId"]
+        
+        url = f"{self.consts.ApiEndpoint}/{loc}/Accounts/{acc_id}/Videos/{video_id}/Index"
+        params = {'accessToken': self.vi_access_token, 'language': 'English'}
+
+        start_time = time.time()
+        while True:
+            resp = requests.get(url, params=params)
+            resp.raise_for_status()
+            
+            result = resp.json()
+            state = result.get('state')
+            
+            if state == 'Processed':
+                return result
+            elif state == 'Failed':
+                raise RuntimeError(f"Video Indexing Failed: {result}")
+            
+            if time.time() - start_time > timeout_sec:
+                raise TimeoutError("Indexing timed out.")
+                
+            time.sleep(10) # Poll every 10 seconds
+
+    def get_thumbnail_base64(self, video_id: str, thumbnail_id: str) -> str:
+        self.get_account_async()
+        vid_token = self._get_account_access_token(scope="Video", video_id=video_id)
+        
+        loc = self.account["location"]
+        acc_id = self.account["properties"]["accountId"]
+        
+        url = (
+            f"{self.consts.ApiEndpoint}/{loc}/Accounts/{acc_id}/"
             f"Videos/{video_id}/Thumbnails/{thumbnail_id}"
         )
-        params = {"accessToken": token}
-        resp = requests.get(url, params=params, timeout=60)
+        resp = requests.get(url, params={'accessToken': vid_token})
+        resp.raise_for_status()
+        
+        return base64.b64encode(resp.content).decode('utf-8')
+
+    def delete_video(self, video_id: str):
+        self.get_account_async()
+        loc = self.account["location"]
+        acc_id = self.account["properties"]["accountId"]
+        
+        url = f"{self.consts.ApiEndpoint}/{loc}/Accounts/{acc_id}/Videos/{video_id}"
+        resp = requests.delete(url, params={'accessToken': self.vi_access_token})
+        
+        if resp.status_code == 404: return
         resp.raise_for_status()
 
-        content_type = resp.headers.get("Content-Type", "")
-        if "image" in content_type:
-            encoded_image = base64.b64encode(resp.content).decode("utf-8")
-            return encoded_image
-        else:
-            raise RuntimeError(f"Unexpected content type for thumbnail: {content_type}")
-
-class VideoIndexerService:
-    """
-    High-level service that:
-      - Accepts base64 video from frontend
-      - Uploads to Azure VI
-      - Waits for processing
-      - Saves raw insights to Mongo
-    """
-    def __init__(self) -> None:
-        self.client = SimpleVideoIndexerClient()
-        self.database = VideoIndexerRepositoryService()
-
-    def index_video_from_base64(
-        self,
-        video_name: str,
-        base64_encoded_video: str,
-        video_description: str = "",
-        excluded_ai: Optional[List[str]] = None,
-    ) -> (str, Dict[str, Any]):
-        """
-        Full pipeline: decode base64 -> upload -> wait for index -> store raw insights.
-        Returns (video_indexer_id, insights_json).
-        """
-        if excluded_ai is None:
-            excluded_ai = [
-                        # "Faces", "Labels", "Emotions", "ObservedPeople", "RollingCredits",
-                        # "Celebrities", "Clapperboard", "FeaturedClothing", "ShotType",
-                        # "PeopleDetectedClothing",
-                    ]
-        # strip "data:video/mp4;base64,..." prefix if present
-        if base64_encoded_video.startswith("data"):
-            data_part = base64_encoded_video.split(",", 1)[1]
-        else:
-            data_part = base64_encoded_video
-
-        video_bytes = base64.b64decode(data_part)
-        buf = io.BytesIO(video_bytes)
-        buf.name = video_name
-
-        # 1) Upload to VI
-        vi_video_id = self.client.upload_video(
-            buf,
-            video_name=video_name,
-            description=video_description,
-            excluded_ai=excluded_ai,
-        )
-
-        # 2) Wait for indexing to finish
-        insights = self.client.wait_for_index(vi_video_id)
-
-        # 3) Store raw insights in Mongo
-        doc = {
-            "video_indexer_id": vi_video_id,
-            "insights": insights,
-        }
-        self.database.insert_video_index_raw(doc)
-
-        return vi_video_id, insights
-
-    def get_prompt_content_and_store(self, video_id: str) -> Dict[str, Any]:
-        """
-        Placeholder for prompt content pipeline if you want it later.
-        For now, this is a stub – implement when needed.
-        """
-        # TODO: Implement /PromptContent flow if you want it.
-        raise NotImplementedError("Prompt content pipeline not implemented yet.")
-
+# --------------------------------------------------------------------------
+# 5. Background Thread Worker
+# --------------------------------------------------------------------------
 def index_video_and_update_metadata(
     course_doc: Dict[str, Any],
     video_object_id: ObjectId,
     video_name: str,
     base64_encoded_video: str,
     video_description: str = "",
+    user_email: str = ""
 ) -> str:
     """
-    Orchestrates:
-      1. Call Azure Video Indexer with the given base64 video.
-      2. Store full insights in vi_raw.
-      3. Fetch thumbnail and attach to vi_videos.
-      4. Update video status to COMPLETED / ERROR.
-
-    Returns:
-      video_indexer_id (str) on success. Raises on error.
+    Orchestrates the upload > wait > update process.
+    Run this in a separate thread.
     """
-    service = VideoIndexerService()
-
+    client = VideoIndexerClient()
     try:
-        # Index via Azure VI
-        vi_video_id, insights = service.index_video_from_base64(
-            video_name=video_name,
-            base64_encoded_video=base64_encoded_video,
-            video_description=video_description,
-        )
+        if base64_encoded_video.startswith("data"):
+            base64_encoded_video = base64_encoded_video.split(",", 1)[1]
+        video_bytes = base64.b64decode(base64_encoded_video)
+        buf = io.BytesIO(video_bytes)
+        buf.name = video_name
 
-        # Try to grab summarized thumbnail if available
-        thumbnail_id = (
-            insights.get("summarizedInsights", {}).get("thumbnailId")
-            or insights.get("videos", [{}])[0]
-                .get("insights", {})
-                .get("thumbnailId")
-        )
+        # Upload
+        logger.info(f"Starting VI upload for {video_object_id}...")
+        vi_video_id = client.file_upload_async(buf, video_name, video_description)
+        update_video_id_thumbnail(video_object_id, vi_video_id, "")
+        
+        # Wait for Indexing (BLOCKING CALL)
+        logger.info(f"Waiting for indexing {vi_video_id}...")
+        insights = client.wait_for_index_async(vi_video_id)
+        
+        # Save Raw Data
+        vi_raw.insert_one({"video_indexer_id": vi_video_id, "insights": insights})
 
-        if thumbnail_id:
-            encoded_img = service.client.get_video_thumbnail(vi_video_id, thumbnail_id)
-            update_video_id_thumbnail(video_object_id, vi_video_id, encoded_img)
+        # --- NEW: Extract Transcript & Push to Vector Store ---
+        logger.info(f"Extracting transcript for {vi_video_id}...")
+        transcript_text = ""
+        if insights.get("videos"):
+            for v in insights["videos"]:
+                for t in v.get("insights", {}).get("transcript", []):
+                    if t.get("text"):
+                        transcript_text += t["text"] + " "
+        
+        if transcript_text:
+            # Import here to avoid potential circular dependency issues during startup
+            from chat_helper import chat_client
+            chat_client.ingest_transcripts(vi_video_id, video_name, transcript_text)
         else:
-            # At least store VI id
-            update_video_id_thumbnail(video_object_id, vi_video_id, "")
+            logger.warning(f"No transcript found for {vi_video_id}")
+        # ------------------------------------------------------
 
+        # Get Thumbnail
+        thumb_id = insights.get("summarizedInsights", {}).get("thumbnailId")
+        if thumb_id:
+            try:
+                b64_thumb = client.get_thumbnail_base64(vi_video_id, thumb_id)
+                update_video_id_thumbnail(video_object_id, vi_video_id, b64_thumb)
+            except Exception as e:
+                logger.warning(f"Thumbnail fetch failed: {e}")
+
+        # Mark Completed
         change_video_status(video_object_id, Status.COMPLETED)
-        logger.info(f"Completed Video Indexer pipeline for {video_object_id} -> {vi_video_id}")
+        logger.info(f"Successfully processed {video_object_id}")
+
+        # Send Email
+        if user_email:
+            course_code = course_doc.get("course_code", "Unknown Course")
+            send_success_email(user_email, video_name, course_code)
+
         return vi_video_id
 
     except Exception as e:
-        logger.exception("Error during Video Indexer pipeline")
+        logger.exception(f"Error processing video {video_object_id}")
         change_video_status(video_object_id, Status.ERROR)
-        raise
+        raise e
+
+def send_success_email(recipient_email: str, video_name: str, course_code: str):
+    """
+    Sends a success email using Outlook SMTP.
+    Requires 'MAIL_USERNAME' and 'MAIL_PASSWORD' (App Password) in env vars.
+    """
+    # default is outlook settings
+    sender_email = os.environ.get("MAIL_USERNAME")
+    sender_password = os.environ.get("MAIL_PASSWORD")
+    smtp_server = os.environ.get("MAIL_SERVER","smtp.office365.com")
+    smtp_port = 587
+
+    # If no email is provided (or user is not an email), skip
+    if not recipient_email or "@" not in recipient_email:
+        logger.warning(f"Invalid email '{recipient_email}'. Skipping notification.")
+        return
+
+    if not sender_email or not sender_password:
+        logger.warning("Email credentials not set. Skipping email notification.")
+        return
+
+    subject = f"Processing Complete: {video_name}"
+    
+    body = f"""
+    <html>
+      <body>
+        <h3 style="color: #2C3463;">Video Indexing Complete</h3>
+        <p>Your video <b>{video_name}</b> has been successfully processed for course <b>{course_code}</b>.</p>
+        <p>You can now view insights and search through the content.</p>
+        <br>
+        <p style="color: gray; font-size: 0.9em;">Regards,<br>Video Indexing Bot</p>
+      </body>
+    </html>
+    """
+
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = recipient_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'html'))
+
+    try:
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+        server.login(sender_email, sender_password)
+        server.sendmail(sender_email, recipient_email, msg.as_string())
+        server.quit()
+        logger.info(f"Sent success email to {recipient_email}")
+    except Exception as e:
+        logger.error(f"Failed to send email: {e}")

@@ -24,7 +24,7 @@ interface PopupProps {
 const { Dragger } = Upload;
 const { Text } = Typography;
 
-const DOC_EXTS = [".pdf", ".docx", ".pptx", ".txt"];
+const DOC_EXTS = [".pdf", ".docx", ".pptx", ".txt", ".csv", ".xlsx"];
 const VIDEO_EXTS = [".mp4", ".mov", ".mkv", ".webm", ".avi"];
 const ACCEPT = [...DOC_EXTS, ...VIDEO_EXTS].join(",");
 
@@ -48,7 +48,7 @@ const DocumentPopup: React.FC<PopupProps> = ({
   const [chunkSize, setChunkSize] = useState(1000);
   const [overlap, setOverlap] = useState(100);
 
-  // 0=Select, 1=Blob, 2=Vector, 3=Database / VI
+  // Steps: 0=Select, 1=Blob, 2=Vector, 3=Database / VI
   const [step, setStep] = useState(0);
 
   const docFiles = useMemo(
@@ -103,6 +103,7 @@ const DocumentPopup: React.FC<PopupProps> = ({
   const uploadVideosViaVI = async () => {
     if (!hasVideos) return;
 
+    // Convert videos to Base64
     const videoPayload = await Promise.all(
       videoFiles.map(async (vf) => {
         const f = vf.originFileObj as File;
@@ -115,13 +116,16 @@ const DocumentPopup: React.FC<PopupProps> = ({
       })
     );
 
-    setStep(3);
+    setStep(3); // Visual indication we are on the final step
+    
+    // Call the new Async Endpoint
     await doFetch("http://localhost:5000/vi/videos", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         courseCode: collectionName,
         video: videoPayload,
+        username: username,
       }),
     });
   };
@@ -136,12 +140,14 @@ const DocumentPopup: React.FC<PopupProps> = ({
 
     try {
       const formData = buildFormData(fileList);
+      
+      // 1) Upload all to Blob Storage
       await doFetch(
         `http://localhost:5000/api/${collectionName}/${domainName}/${username}/createblob`,
         { method: "PUT", body: formData }
       );
 
-      // 2) DOCS → Vector
+      // 2) DOCS → Vector Store
       if (hasDocs) {
         setStep(2);
         await doFetch("http://localhost:5000/vectorstore", {
@@ -155,18 +161,25 @@ const DocumentPopup: React.FC<PopupProps> = ({
         });
       }
 
+      // 3) Create Document Records in MongoDB (Generic)
       setStep(3);
       await doFetch(
         `http://localhost:5000/api/${collectionName}/${domainName}/${username}/createdocument`,
         { method: "PUT", body: buildFormData(fileList) }
       );
 
-      // 3B) VIDEOS → VI API
+      // 4) VIDEOS → VI API (This initiates the background indexing)
       if (hasVideos) {
         await uploadVideosViaVI();
       }
 
-      message.success("Upload complete");
+      // Final success message
+      if (hasVideos) {
+        message.success("Upload successful. Video indexing has started in the background.");
+      } else {
+        message.success("Upload complete.");
+      }
+      
       onFileCreated();
       onClose();
     } catch (err: any) {
@@ -228,8 +241,8 @@ const DocumentPopup: React.FC<PopupProps> = ({
             Click or drag files to this area to upload
           </p>
           <p className="ant-upload-hint">
-            Allowed: PDF, DOCX, PPTX, TXT (docs go to Blob → Vector → DB) and
-            videos (MP4, MOV, MKV, WEBM, AVI) which go to Blob → DB and are also
+            Allowed: PDF, DOCX, PPTX, TXT, CSV, XLSX (docs go to Blob → Vector → DB) and
+            videos (MP4, MOV, MKV, WEBM, AVI) which go to Blob → DB and are 
             registered with the Video Indexer API.
           </p>
         </Dragger>
@@ -243,7 +256,7 @@ const DocumentPopup: React.FC<PopupProps> = ({
           {hasVideos && (
             <Text type="secondary">
               {videoFiles.length} video file(s) will be stored in Blob / DB and
-              sent to the Video Indexer API (not vectorized).
+              sent to the Video Indexer API.
             </Text>
           )}
         </Space>
