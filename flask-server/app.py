@@ -57,6 +57,7 @@ from video_indexer_helper import (
     get_video_document_by_id,
     delete_video_entry_from_db,
     get_course_videos_manage,
+    get_all_video_ids_for_course,
     VideoIndexerClient,
     VideoDetails
 )
@@ -1018,7 +1019,7 @@ def delete_video_indexer_entry():
 def chat_with_video(video_id):
     """
     Endpoint to chat with a specific video's knowledge base.
-    Expects JSON body: { "message": "...", "previous_messages": [...] }
+    Expects JSON body: { "message": "...", "previous_messages": [...], "video_ids": [], "course_code": "" }
     """
     try:
         # 1. Get JSON data from Flask
@@ -1033,7 +1034,9 @@ def chat_with_video(video_id):
         answer = chat_client.generate_response(
             video_id=video_id, 
             message=body.message, 
-            previous_messages=body.previous_messages
+            previous_messages=body.previous_messages,
+            video_ids=body.video_ids, 
+            course_code=body.course_code 
         )
         
         return jsonify({"answer": answer}), 200
@@ -1041,6 +1044,45 @@ def chat_with_video(video_id):
     except Exception as e:
         print(f"Chat error for video {video_id}: {e}")
         # If Pydantic validation fails, it usually raises a ValidationError
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/chat/course", methods=["POST"])
+def chat_with_course():
+    """
+    Unified Endpoint for Chatting with Course OR Specific Videos.
+    Expects JSON body: { "message": "...", "course_code": "...", "video_ids": ["..."] }
+    """
+    try:
+        data = request.get_json()
+        body = ChatRequestBody(**data) 
+        
+        target_video_ids = body.video_ids
+        course_code = body.course_code
+
+        # Logic:
+        # If video_ids are provided, use them.
+        # If video_ids are missing but course_code is present, fetch all videos for that course.
+        if not target_video_ids and course_code:
+            print(f"No video_ids provided. Fetching all videos for course: {course_code}")
+            target_video_ids = get_all_video_ids_for_course(course_code)
+            print(target_video_ids)
+            
+            if not target_video_ids:
+                return jsonify({"answer": f"I couldn't find any processed videos for course {course_code}. Please upload videos first."}), 200
+
+        print(body.message, target_video_ids, course_code)
+        # 3. Call ChatHelper with the resolved list of IDs
+        answer = chat_client.generate_response(
+            message=body.message, 
+            previous_messages=body.previous_messages,
+            video_ids=target_video_ids,
+            course_code=course_code # Pass this for routing logic if needed
+        )
+        
+        return jsonify({"answer": answer}), 200
+
+    except Exception as e:
+        print(f"Chat error: {e}")
         return jsonify({"error": str(e)}), 500
 
 

@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { Suspense } from "react";
 import { PublicClientApplication } from "@azure/msal-browser";
 import { msalConfig } from "@/authConfig";
+import { useRouter } from "next/navigation"; // Import useRouter
 
 import DocumentPopup from "../../../components/course_files/DocumentPopup";
 import FileDeletionPopup from "../../../components/course_files/FileDeletionPopup";
@@ -26,6 +27,7 @@ import {
   PlusOutlined,
   SearchOutlined,
   FolderOpenOutlined,
+  MessageOutlined, // Import Message icon
 } from "@ant-design/icons";
 
 // 1. UPDATE INTERFACE: Add vi_mongo_id and keep status as string
@@ -53,6 +55,7 @@ function Fileslist({
 }: {
   params: { domain: string; course: string };
 }): JSX.Element {
+  const router = useRouter(); // Initialize router
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -92,6 +95,13 @@ function Fileslist({
 
   const openUploadModal = () => setShowUploadModal(true);
   const closeUploadModal = () => setShowUploadModal(false);
+
+  // Navigate to Course Chat
+  const handleChatClick = () => {
+    router.push(
+      `/knowledgebase_management/${encodeURIComponent(collectionName)}/${encodeURIComponent(domainName)}/chat`
+    );
+  };
 
   // Updated Handler to accept vi_mongo_id
   const handlePressDelete = (
@@ -219,15 +229,24 @@ function Fileslist({
             {collectionName}
           </Title>
 
-          {documents.length > 0 && (
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={openUploadModal}
+          <Space>
+            <Button 
+                type="default" 
+                icon={<MessageOutlined />} 
+                onClick={handleChatClick}
             >
-              Add New File
+                Chat with Course
             </Button>
-          )}
+            {documents.length > 0 && (
+                <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={openUploadModal}
+                >
+                Add New File
+                </Button>
+            )}
+          </Space>
         </Flex>
 
         {documents.length > 0 && (

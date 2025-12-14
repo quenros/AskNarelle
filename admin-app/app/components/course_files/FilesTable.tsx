@@ -258,7 +258,7 @@ const FilesTable: React.FC<FileTableProps> = ({
                     d.name,
                     d.version_id,
                     d.is_root_blob,
-                    d.vi_mongo_id // PASS THE ID HERE
+                    d.vi_mongo_id 
                   )
                 }
               >

@@ -67,19 +67,6 @@ const PreviewPage: React.FC = () => {
     );
   }
 
-  const handleChatClick = () => {
-    if (!preview) return;
-
-    // 2. Use the 'passedId' (from URL) first. 
-    // If not there, check if backend sent an ID ('preview.id'). 
-    // Fallback to 'preview.name' (filename).
-    const videoIdentifier = passedId || preview.id || preview.name; 
-    
-    // Navigate to Chat Page
-    router.push(
-      `/knowledgebase_management/${encodeURIComponent(course)}/${encodeURIComponent(domain)}/preview/chat?id=${encodeURIComponent(videoIdentifier)}&name=${encodeURIComponent(preview.name)}`
-    );
-  };
 
   return (
     <div style={{ padding: 24, maxWidth: 1000, margin: "0 auto" }}>
@@ -104,15 +91,6 @@ const PreviewPage: React.FC = () => {
 
         {/* Button Area */}
         <Space>
-          {preview?.kind === "video" && (
-            <Button 
-                type="primary" 
-                icon={<MessageOutlined />} 
-                onClick={handleChatClick}
-            >
-                Chat with Video
-            </Button>
-          )}
           <Button onClick={() => router.back()}>Back</Button>
         </Space>
       </div>

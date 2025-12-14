@@ -1,5 +1,6 @@
 import os
 import io
+import re
 import time
 import base64
 import logging
@@ -8,15 +9,26 @@ import schedule
 import threading
 from typing import Dict, List, Any, Optional
 from enum import Enum
+from datetime import datetime
 
+# Environment & DB
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from bson import ObjectId
 from azure.identity import DefaultAzureCredential
-from datetime import datetime
 
+# Models
 from model import CourseDetails, VideoDetails
 
+# LangChain / AI
+from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
+from langchain_community.vectorstores import AzureCosmosDBVectorSearch
+from langchain_community.vectorstores.azure_cosmos_db import CosmosDBSimilarityType, CosmosDBVectorSearchType
+from langchain_core.documents import Document
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.prompts import PromptTemplate
+
+# Email
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -41,7 +53,7 @@ class VIConsts:
         self.Location = os.environ.get("VIDEO_INDEXER_LOCATION", "trial")
 
 # --------------------------------------------------------------------------
-# 2. Database Setup & Models
+# 2. Database Setup
 # --------------------------------------------------------------------------
 mongo_uri = os.environ.get('MONGO_URI')
 client = MongoClient(mongo_uri)
@@ -51,6 +63,10 @@ vi_courses = vi_db['course']
 vi_videos = vi_db['video']
 vi_raw = vi_db.get_collection("video_indexer_raw")
 
+vi_transcript_full = vi_db['transcript_full']
+vi_prompt_raw = vi_db['prompt_content_raw']
+vi_prompt_clean = vi_db['prompt_content_clean']
+
 class Status(str, Enum):
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
@@ -59,6 +75,9 @@ class Status(str, Enum):
 def vi_ensure_indexes():
     vi_courses.create_index("course_code", unique=True)
     vi_videos.create_index("course_reference_id")
+    vi_transcript_full.create_index("video_reference_id")
+    vi_prompt_raw.create_index("video_id")
+    vi_prompt_clean.create_index("video_id")
 
 # --------------------------------------------------------------------------
 # 3. Database Helper Functions
@@ -82,7 +101,6 @@ def vi_add_course(course_code: str, course_name: str, description: str, owner_us
     vi_courses.insert_one(doc)
     return True
 
-#  Getter Function for status of video indexing.
 def get_course_videos_manage(course_code: Optional[str] = None):
     query = {}
     if course_code:
@@ -161,6 +179,36 @@ def get_video_document_by_id(video_mongo_id: str):
     except:
         return None
 
+def get_all_video_ids_for_course(course_code: str) -> List[str]:
+    """
+    Retrieves all Azure Video IDs associated with a specific course code.
+    """
+    try:
+        # Find the course document
+        course_doc = vi_courses.find_one({"course_code": course_code})
+        if not course_doc:
+            logger.warning(f"Course not found: {course_code}")
+            return []
+
+        # 2. Get list of video ObjectIds
+        video_oids = course_doc.get("videos", [])
+        if not video_oids:
+            return []
+
+        # Query video collection for Azure IDs
+        # We only want videos that have a valid 'video_id' (Azure ID)
+        cursor = vi_videos.find(
+            {"_id": {"$in": video_oids}, "video_id": {"$exists": True, "$ne": ""}},
+            {"video_id": 1}
+        )
+        
+        # Extract IDs
+        return [doc["video_id"] for doc in cursor]
+
+    except Exception as e:
+        logger.error(f"Error fetching video IDs for course {course_code}: {e}")
+        return []
+
 def delete_video_entry_from_db(video_mongo_id: str):
     """Removes video from Video collection and Course reference."""
     try:
@@ -179,7 +227,7 @@ def delete_video_entry_from_db(video_mongo_id: str):
         return False
 
 # --------------------------------------------------------------------------
-# 4. Robust Video Indexer Client
+# 4. Robust Video Indexer Client (Added get_prompt_content)
 # --------------------------------------------------------------------------
 class VideoIndexerClient:
     _instance = None 
@@ -200,11 +248,9 @@ class VideoIndexerClient:
         self.account = None
         self.initialized = True
         
-        # Initial Auth & Start Scheduler
         self.authenticate_async()
         self.start_authentication_scheduler()
 
-    # --- Auth Logic ---
     def _get_arm_access_token(self):
         credential = DefaultAzureCredential()
         scope = "https://management.azure.com/.default"
@@ -235,7 +281,6 @@ class VideoIndexerClient:
             logger.error(f"Failed to refresh tokens: {e}")
 
     def schedule_authentication(self):
-        # Refresh tokens every 50 minutes (Tokens expire in 60 mins)
         schedule.every(50).minutes.do(self.authenticate_async)
         while True:
             schedule.run_pending()
@@ -284,8 +329,7 @@ class VideoIndexerClient:
         resp.raise_for_status()
         return resp.json().get('id')
 
-    def wait_for_index_async(self, video_id: str, timeout_sec: int = 1200) -> Dict:
-        """Blocks and polls until processing is done. Safe for background threads."""
+    def wait_for_index_async(self, video_id: str, timeout_sec: int = 4000) -> Dict:
         self.get_account_async()
         loc = self.account["location"]
         acc_id = self.account["properties"]["accountId"]
@@ -309,7 +353,7 @@ class VideoIndexerClient:
             if time.time() - start_time > timeout_sec:
                 raise TimeoutError("Indexing timed out.")
                 
-            time.sleep(10) # Poll every 10 seconds
+            time.sleep(10)
 
     def get_thumbnail_base64(self, video_id: str, thumbnail_id: str) -> str:
         self.get_account_async()
@@ -327,6 +371,19 @@ class VideoIndexerClient:
         
         return base64.b64encode(resp.content).decode('utf-8')
 
+    # --- NEW: Get Prompt Content (Insights) ---
+    def get_prompt_content(self, video_id: str) -> Dict:
+        self.get_account_async()
+        loc = self.account["location"]
+        acc_id = self.account["properties"]["accountId"]
+        
+        url = f"{self.consts.ApiEndpoint}/{loc}/Accounts/{acc_id}/Videos/{video_id}/PromptContent"
+        params = {'accessToken': self.vi_access_token}
+        
+        resp = requests.post(url, params=params) # The API might be POST
+        resp.raise_for_status()
+        return resp.json()
+
     def delete_video(self, video_id: str):
         self.get_account_async()
         loc = self.account["location"]
@@ -339,7 +396,241 @@ class VideoIndexerClient:
         resp.raise_for_status()
 
 # --------------------------------------------------------------------------
-# 5. Background Thread Worker
+# 5. Transcript Processor (Merged from TranscriptService)
+# --------------------------------------------------------------------------
+def get_clean_prompt_template():
+    return """
+    You are a helpful assistant. Your task is to clean the following video transcript chunk to fix grammar, remove filler words (like 'um', 'uh'), and ensure sentences are complete, while strictly maintaining the original meaning and context.
+    
+    Course Description: {course description}
+    Video Description: {video description}
+    
+    Transcript Chunk:
+    {context}
+    
+    Cleaned Transcript:
+    """
+
+def timestamp_to_seconds(timestamp_str: str) -> float:
+    # Format: 0:00:05.34 or 00:00:05.34
+    try:
+        parts = timestamp_str.split(':')
+        seconds = float(parts[-1])
+        minutes = int(parts[-2])
+        hours = int(parts[-3])
+        return hours * 3600 + minutes * 60 + seconds
+    except:
+        return 0.0
+
+def seconds_to_timestamp(seconds: float) -> str:
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    return "{:d}:{:02d}:{:05.2f}".format(int(h), int(m), s)
+
+def break_transcript_to_chunks(transcript, max_length=10000):
+    chunks = []
+    items = re.findall(r'\[\d{1,2}:\d{2}:\d{2}.\d{1,2}] [^\[]+', transcript)
+    current_size = 0
+    current_items = []
+    for item in items:
+        current_size += len(item)
+        current_items.append(item)
+        if current_size > max_length:
+            chunks.append(''.join(current_items))
+            current_size = 0
+            current_items = []
+    if current_items:
+        chunks.append(''.join(current_items))
+    return chunks
+
+class TranscriptManager:
+    def __init__(self):
+        self.azure_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
+        self.api_key = os.environ.get("AZURE_OPENAI_API_KEY")
+        self.api_version = os.environ.get("OPENAI_API_VERSION")
+        self.deployment_name = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME")
+        self.embedding_model = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
+        
+        self.chat_model = AzureChatOpenAI(
+            azure_endpoint=self.azure_endpoint,
+            api_key=self.api_key,
+            api_version=self.api_version,
+            azure_deployment=self.deployment_name,
+            temperature=0
+        )
+        
+        self.embeddings = AzureOpenAIEmbeddings(
+            azure_endpoint=self.azure_endpoint,
+            api_key=self.api_key,
+            openai_api_version=self.api_version,
+            model=self.embedding_model
+        )
+
+    def map_insights_to_transcript(self, insight: Dict, video_object_id: ObjectId):
+        """Extracts phrases and raw transcript from VI insights."""
+        try:
+            transcript_list = insight["videos"][0]["insights"]["transcript"]
+            document = {
+                "phrases": [
+                    {
+                        "start": phrase["instances"][0]["adjustedStart"],
+                        "end": phrase["instances"][0]["adjustedEnd"],
+                        "phrase": phrase["text"]
+                    } for phrase in transcript_list
+                ]
+            }
+
+            transcript_timestamp = ""
+            transcript_raw = ""
+            for phrase in transcript_list:
+                start = phrase["instances"][0]["adjustedStart"]
+                text = phrase["text"]
+                transcript_timestamp += f"[{start}] {text} "
+                transcript_raw += f"{text} "
+            
+            document["transcript_timestamp"] = transcript_timestamp.strip()
+            document["transcript"] = transcript_raw.strip()
+            document["video_reference_id"] = video_object_id
+            
+            vi_transcript_full.insert_one(document)
+            logger.info(f"Saved raw transcript for {video_object_id}")
+        except Exception as e:
+            logger.error(f"Error mapping insights: {e}")
+
+    def generate_clean_transcript(self, transcript_chunk: str, course_desc: str, video_desc: str):
+        try:
+            prompt = PromptTemplate(
+                template=get_clean_prompt_template(),
+                input_variables=["course description", "video description", "context"]
+            )
+            chain = create_stuff_documents_chain(self.chat_model, prompt)
+            return chain.invoke({
+                "course description": course_desc,
+                "video description": video_desc,
+                "context": [Document(page_content=transcript_chunk)]
+            })
+        except Exception as e:
+            logger.error(f"Cleaning error: {e}")
+            return transcript_chunk
+
+    def trigger_transcript_cleaning(self, video_object_id: ObjectId, course: Dict, video_desc: str):
+        """Reads raw transcript, chunks it, cleans it via LLM, and updates DB."""
+        transcript_doc = vi_transcript_full.find_one({"video_reference_id": video_object_id})
+        if not transcript_doc:
+            logger.warning("No transcript doc found to clean.")
+            return
+
+        transcript = transcript_doc["transcript_timestamp"]
+        chunks = break_transcript_to_chunks(transcript)
+        
+        course_outline = f"{course.get('course_code','')} {course.get('course_name','')} {course.get('course_description','')}"
+        
+        responses_clean = []
+        for chunk in chunks:
+            cleaned = self.generate_clean_transcript(chunk, course_outline, video_desc)
+            # 'cleaned' might be a string or a dict result depending on chain version
+            if isinstance(cleaned, str):
+                responses_clean.append(cleaned)
+            elif isinstance(cleaned, dict) and 'output_text' in cleaned: # Legacy chain return
+                 responses_clean.append(cleaned['output_text'])
+            else:
+                 responses_clean.append(str(cleaned))
+
+        final_clean_text = "".join(responses_clean).replace("\n", " ").replace("\r", " ")
+        
+        vi_transcript_full.update_one(
+            {"video_reference_id": video_object_id},
+            {"$set": {"cleaned_transcript": final_clean_text}}
+        )
+        logger.info(f"Updated cleaned transcript for {video_object_id}")
+
+    def update_prompt_with_clean_transcript(self, video_object_id: ObjectId, video_id: str):
+        """Merges cleaned transcript into Prompt Content structure and vectorizes it."""
+        # 1. Get Cleaned Transcript
+        transcript_doc = vi_transcript_full.find_one({"video_reference_id": video_object_id})
+        if not transcript_doc or "cleaned_transcript" not in transcript_doc:
+            logger.warning("No cleaned transcript available.")
+            return
+
+        # 2. Get Raw Prompt Content (Structure)
+        prompt_doc = vi_prompt_raw.find_one({"video_id": video_id})
+        if not prompt_doc:
+            logger.warning("No raw prompt content available.")
+            return
+
+        # 3. Merge Logic
+        transcript = transcript_doc['cleaned_transcript']
+        pattern = r"\[(\d+:\d+:\d+\.\d+)\]\s*([^[]+)"
+        matches = re.findall(pattern, transcript)
+        transcript_data = [{"time": timestamp_to_seconds(t), "text": txt.strip()} for t, txt in matches]
+
+        if not transcript_data:
+            # Fallback if cleaning removed timestamps or format mismatch
+            logger.warning("Cleaning removed timestamps, using raw merge.")
+            # Simplified merge could go here, or just skip
+        
+        index = 0
+        sections = prompt_doc.get("result", {}).get("sections", [])
+        for section in sections:
+            split_text = re.split(r"\[Transcript]", section.get("content", ""))
+            start_time = timestamp_to_seconds(section.get("start", "0:00:00.0"))
+            end_time = timestamp_to_seconds(section.get("end", "0:00:00.0"))
+            
+            pending_text = []
+            while index < len(transcript_data):
+                t_time = transcript_data[index]['time']
+                if start_time <= t_time <= end_time:
+                    ts_str = seconds_to_timestamp(t_time)
+                    pending_text.append(f"({ts_str}) {transcript_data[index]['text']}")
+                    index += 1
+                elif t_time < start_time:
+                    index += 1 # Skip outdated
+                else:
+                    break # belongs to next section
+            
+            # Reconstruct content with [Transcript] marker
+            prefix = split_text[0] if split_text else ""
+            section["content"] = f"{prefix} [Transcript] {' '.join(pending_text)}"
+
+        # 4. Ingest into Vector Store
+        self.insert_prompt_context_index(prompt_doc, video_id)
+
+    def insert_prompt_context_index(self, prompt_content_doc, video_id):
+        sections = prompt_content_doc.get("result", {}).get("sections", [])
+        formatted_documents = []
+        
+        for doc in sections:
+            formatted_documents.append(Document(
+                page_content=doc.get("content", ""),
+                metadata={
+                    "video_id": video_id,
+                    "start": doc.get("start"),
+                    "end": doc.get("end")
+                }
+            ))
+
+        if formatted_documents:
+            # Setup Vector Store Connection (Ephemeral for this operation)
+            vector_store = AzureCosmosDBVectorSearch.from_connection_string(
+                connection_string=mongo_uri,
+                namespace=f"videoindexer.prompt_content_clean",
+                embedding=self.embeddings,
+            )
+            # Create index just in case (Idempotent)
+            vector_store.create_index(
+                num_lists=100,
+                dimensions=1536,
+                similarity_algorithm=CosmosDBSimilarityType.COS,
+                kind=CosmosDBVectorSearchType.VECTOR_IVF,
+                m=16,
+                ef_construction=64
+            )
+            
+            vector_store.add_documents(formatted_documents)
+            logger.info(f"Successfully ingested {len(formatted_documents)} chunks to Vector Store for {video_id}")
+
+# --------------------------------------------------------------------------
+# 6. Background Thread Worker (UPDATED ORCHESTRATOR)
 # --------------------------------------------------------------------------
 def index_video_and_update_metadata(
     course_doc: Dict[str, Any],
@@ -350,10 +641,11 @@ def index_video_and_update_metadata(
     user_email: str = ""
 ) -> str:
     """
-    Orchestrates the upload > wait > update process.
-    Run this in a separate thread.
+    Orchestrates the upload > wait > clean > ingest process.
     """
     client = VideoIndexerClient()
+    tm = TranscriptManager()
+    
     try:
         if base64_encoded_video.startswith("data"):
             base64_encoded_video = base64_encoded_video.split(",", 1)[1]
@@ -361,36 +653,19 @@ def index_video_and_update_metadata(
         buf = io.BytesIO(video_bytes)
         buf.name = video_name
 
-        # Upload
+        # 1. Upload to Azure
         logger.info(f"Starting VI upload for {video_object_id}...")
         vi_video_id = client.file_upload_async(buf, video_name, video_description)
         update_video_id_thumbnail(video_object_id, vi_video_id, "")
         
-        # Wait for Indexing (BLOCKING CALL)
+        # 2. Wait for Indexing
         logger.info(f"Waiting for indexing {vi_video_id}...")
         insights = client.wait_for_index_async(vi_video_id)
         
-        # Save Raw Data
+        # 3. Save Raw Data
         vi_raw.insert_one({"video_indexer_id": vi_video_id, "insights": insights})
 
-        # --- NEW: Extract Transcript & Push to Vector Store ---
-        logger.info(f"Extracting transcript for {vi_video_id}...")
-        transcript_text = ""
-        if insights.get("videos"):
-            for v in insights["videos"]:
-                for t in v.get("insights", {}).get("transcript", []):
-                    if t.get("text"):
-                        transcript_text += t["text"] + " "
-        
-        if transcript_text:
-            # Import here to avoid potential circular dependency issues during startup
-            from chat_helper import chat_client
-            chat_client.ingest_transcripts(vi_video_id, video_name, transcript_text)
-        else:
-            logger.warning(f"No transcript found for {vi_video_id}")
-        # ------------------------------------------------------
-
-        # Get Thumbnail
+        # 4. Get Thumbnail
         thumb_id = insights.get("summarizedInsights", {}).get("thumbnailId")
         if thumb_id:
             try:
@@ -399,11 +674,36 @@ def index_video_and_update_metadata(
             except Exception as e:
                 logger.warning(f"Thumbnail fetch failed: {e}")
 
-        # Mark Completed
+        # 5. Get Prompt Content (Structured Insights)
+        try:
+            prompt_content = client.get_prompt_content(vi_video_id)
+            # Save raw prompt content to DB
+            prompt_content["video_id"] = vi_video_id # Ensure ID is attached
+            vi_prompt_raw.insert_one(prompt_content)
+        except Exception as e:
+            logger.error(f"Failed to get Prompt Content: {e}")
+            prompt_content = {}
+
+        # 6. Transcript Processing Pipeline
+        logger.info(f"Starting Transcript Pipeline for {vi_video_id}...")
+        
+        # A. Map Insights -> Raw Transcript with Timestamps
+        tm.map_insights_to_transcript(insights, video_object_id)
+        
+        # B. Clean Transcript (LLM)
+        tm.trigger_transcript_cleaning(video_object_id, course_doc, video_description)
+        
+        # C. Merge Clean Transcript -> Prompt Content & Ingest to Vector Store
+        if prompt_content:
+            tm.update_prompt_with_clean_transcript(video_object_id, vi_video_id)
+        else:
+            logger.warning("Skipping vector ingestion due to missing prompt content.")
+
+        # 7. Mark Completed
         change_video_status(video_object_id, Status.COMPLETED)
         logger.info(f"Successfully processed {video_object_id}")
 
-        # Send Email
+        # 8. Send Email
         if user_email:
             course_code = course_doc.get("course_code", "Unknown Course")
             send_success_email(user_email, video_name, course_code)
@@ -416,38 +716,21 @@ def index_video_and_update_metadata(
         raise e
 
 def send_success_email(recipient_email: str, video_name: str, course_code: str):
-    """
-    Sends a success email using Outlook SMTP.
-    Requires 'MAIL_USERNAME' and 'MAIL_PASSWORD' (App Password) in env vars.
-    """
-    # default is outlook settings
+    # (Keep existing email logic)
     sender_email = os.environ.get("MAIL_USERNAME")
     sender_password = os.environ.get("MAIL_PASSWORD")
     smtp_server = os.environ.get("MAIL_SERVER","smtp.office365.com")
     smtp_port = 587
 
-    # If no email is provided (or user is not an email), skip
-    if not recipient_email or "@" not in recipient_email:
-        logger.warning(f"Invalid email '{recipient_email}'. Skipping notification.")
-        return
-
-    if not sender_email or not sender_password:
-        logger.warning("Email credentials not set. Skipping email notification.")
-        return
+    if not recipient_email or "@" not in recipient_email: return
+    if not sender_email or not sender_password: return
 
     subject = f"Processing Complete: {video_name}"
-    
-    body = f"""
-    <html>
-      <body>
+    body = f"""<html><body>
         <h3 style="color: #2C3463;">Video Indexing Complete</h3>
-        <p>Your video <b>{video_name}</b> has been successfully processed for course <b>{course_code}</b>.</p>
-        <p>You can now view insights and search through the content.</p>
-        <br>
-        <p style="color: gray; font-size: 0.9em;">Regards,<br>Video Indexing Bot</p>
-      </body>
-    </html>
-    """
+        <p>Your video <b>{video_name}</b> has been processed for <b>{course_code}</b>.</p>
+        <p>You can now search and chat with this video.</p>
+        </body></html>"""
 
     msg = MIMEMultipart()
     msg['From'] = sender_email
@@ -461,6 +744,5 @@ def send_success_email(recipient_email: str, video_name: str, course_code: str):
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, recipient_email, msg.as_string())
         server.quit()
-        logger.info(f"Sent success email to {recipient_email}")
     except Exception as e:
         logger.error(f"Failed to send email: {e}")

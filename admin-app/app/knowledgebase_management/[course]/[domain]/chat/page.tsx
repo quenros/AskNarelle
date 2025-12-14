@@ -10,7 +10,6 @@ import {
   Typography,
   Avatar,
   Spin,
-  Card,
   Breadcrumb,
   message as antMessage,
   Empty,
@@ -25,7 +24,6 @@ import {
 const { Header, Content, Footer } = Layout;
 const { Text, Title } = Typography;
 
-// --- Interfaces matching your Backend ---
 interface ChatHistory {
   user_input: string;
   assistant_response: string;
@@ -38,26 +36,22 @@ interface ChatMessage {
 
 const ChatPage: React.FC = () => {
   const router = useRouter();
-  
-  // 1. Get Path Params (Course/Domain)
   const params = useParams();
-  const course = String(params?.course || "");
-  const domain = String(params?.domain || "");
+  const course = decodeURIComponent(String(params?.course || ""));
+  const domain = decodeURIComponent(String(params?.domain || ""));
 
-  // 2. Get Query Params (Video ID / Name)
   const searchParams = useSearchParams();
   const videoId = searchParams.get("id") || "";
-  const videoName = searchParams.get("name") || "Video Chat";
+  const videoName = searchParams.get("name"); 
+
+  const isCourseChat = !videoId;
+  const chatTitle = isCourseChat ? `Course Chat: ${course}` : (videoName || "Video Chat");
 
   const [loading, setLoading] = useState(false);
   const [inputText, setInputText] = useState("");
-  
-  // UI State for the list
   const [uiMessages, setUiMessages] = useState<ChatMessage[]>([]);
-  // API State for the history buffer
   const [apiHistory, setApiHistory] = useState<ChatHistory[]>([]);
 
-  // Auto-scroll logic
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -69,26 +63,32 @@ const ChatPage: React.FC = () => {
 
   const handleSend = async () => {
     if (!inputText.trim()) return;
-    if (!videoId) {
-        antMessage.error("Missing Video ID. Cannot send message.");
-        return;
-    }
 
     const userMsg = inputText;
     setInputText("");
     setLoading(true);
 
-    // 1. Optimistic UI Update
     setUiMessages((prev) => [...prev, { role: "user", content: userMsg }]);
 
     try {
-      // 2. Prepare Payload for Backend
-      const payload = {
+      // Construct Payload matching ChatRequestBody
+      const payload: any = {
         previous_messages: apiHistory,
         message: userMsg,
+        course_code: course, // Always send course context
+        video_ids: [] // Default empty
       };
 
-      const res = await fetch(`http://localhost:5000/chat/${encodeURIComponent(videoId)}`, {
+      // Determine Endpoint & specific params
+      let url = `http://localhost:5000/api/chat/course`; 
+
+      if (!isCourseChat) {
+        // Single Video Context
+        payload.video_ids = [videoId]; 
+      } 
+      // Else: Leave video_ids empty -> Backend will fetch all videos for 'course_code'
+
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -99,10 +99,8 @@ const ChatPage: React.FC = () => {
       const data = await res.json();
       const botResponse = data.answer || "Sorry, I couldn't understand that.";
 
-      // 4. Update UI with Bot Response
       setUiMessages((prev) => [...prev, { role: "assistant", content: botResponse }]);
       
-      // 5. Update History
       setApiHistory((prev) => [
         ...prev,
         { user_input: userMsg, assistant_response: botResponse },
@@ -111,29 +109,13 @@ const ChatPage: React.FC = () => {
     } catch (error) {
       console.error(error);
       antMessage.error("Error connecting to knowledge base.");
-      // Optional: remove the user message on failure or show retry
     } finally {
       setLoading(false);
     }
   };
 
-  // If no video ID is present, show an error state
-  if (!videoId) {
-    return (
-        <Layout style={{ height: "100vh", background: "#fff", padding: 50 }}>
-            <Empty 
-                description="No Video Selected" 
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-            >
-                <Button onClick={() => router.back()}>Go Back</Button>
-            </Empty>
-        </Layout>
-    );
-  }
-
   return (
     <Layout style={{ height: "100vh", background: "#fff" }}>
-      {/* --- HEADER --- */}
       <Header
         style={{
           background: "#fff",
@@ -157,18 +139,17 @@ const ChatPage: React.FC = () => {
               items={[
                 { title: course },
                 { title: domain },
-                { title: "Chat" },
+                { title: isCourseChat ? "Course Chat" : "Video Chat" },
               ]}
               style={{ fontSize: 12, lineHeight: "20px" }}
             />
             <Title level={5} style={{ margin: 0, lineHeight: "24px" }}>
-              {videoName}
+              {chatTitle}
             </Title>
           </div>
         </div>
       </Header>
 
-      {/* --- CHAT CONTENT --- */}
       <Content
         style={{
           padding: "24px",
@@ -179,7 +160,6 @@ const ChatPage: React.FC = () => {
         }}
       >
         <div style={{ width: "100%", maxWidth: 800 }}>
-          {/* Welcome Empty State */}
           {uiMessages.length === 0 && (
             <div style={{ textAlign: "center", marginTop: 80, opacity: 0.6 }}>
               <div style={{ 
@@ -188,14 +168,16 @@ const ChatPage: React.FC = () => {
               }}>
                 <RobotOutlined style={{ fontSize: 40, color: "#1890ff" }} />
               </div>
-              <Title level={3}>Video Knowledge Base</Title>
+              <Title level={3}>{isCourseChat ? "Course Knowledge Base" : "Video Knowledge Base"}</Title>
               <Text style={{ fontSize: 16 }}>
-                Ask questions about <b>{videoName}</b>. <br/> I can reference specific timestamps in the video.
+                {isCourseChat 
+                    ? `Ask anything about the ${course} course materials.`
+                    : `Ask questions specifically about ${videoName || "this video"}.`
+                }
               </Text>
             </div>
           )}
 
-          {/* Message List */}
           <List
             itemLayout="horizontal"
             dataSource={uiMessages}
@@ -236,14 +218,13 @@ const ChatPage: React.FC = () => {
 
           {loading && (
             <div style={{ padding: "20px 0", textAlign: "center" }}>
-              <Spin tip="Analyzing video transcript..." />
+              <Spin tip="Analyzing knowledge base..." />
             </div>
           )}
           <div ref={messagesEndRef} />
         </div>
       </Content>
 
-      {/* --- FOOTER INPUT --- */}
       <Footer
         style={{
           background: "#fff",
