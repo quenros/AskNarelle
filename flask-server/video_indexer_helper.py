@@ -63,6 +63,7 @@ vi_courses = vi_db['course']
 vi_videos = vi_db['video']
 vi_raw = vi_db.get_collection("video_indexer_raw")
 
+# New Collections based on TranscriptService
 vi_transcript_full = vi_db['transcript_full']
 vi_prompt_raw = vi_db['prompt_content_raw']
 vi_prompt_clean = vi_db['prompt_content_clean']
@@ -140,6 +141,36 @@ def check_if_course_exist(course_code: str):
     doc = vi_courses.find_one({"course_code": course_code})
     return doc or {}
 
+def get_all_video_ids_for_course(course_code: str) -> List[str]:
+    """
+    Retrieves all Azure Video IDs associated with a specific course code.
+    """
+    try:
+        # 1. Find the course document
+        course_doc = vi_courses.find_one({"course_code": course_code})
+        if not course_doc:
+            logger.warning(f"Course not found: {course_code}")
+            return []
+
+        # 2. Get list of video ObjectIds
+        video_oids = course_doc.get("videos", [])
+        if not video_oids:
+            return []
+
+        # 3. Query video collection for Azure IDs
+        # We only want videos that have a valid 'video_id' (Azure ID)
+        cursor = vi_videos.find(
+            {"_id": {"$in": video_oids}, "video_id": {"$exists": True, "$ne": ""}},
+            {"video_id": 1}
+        )
+        
+        # 4. Extract IDs
+        return [doc["video_id"] for doc in cursor]
+
+    except Exception as e:
+        logger.error(f"Error fetching video IDs for course {course_code}: {e}")
+        return []
+
 def insert_video_indexing_progress(video: VideoDetails, course_id: ObjectId):
     """Creates the initial DB record with IN_PROGRESS status."""
     doc = {
@@ -179,36 +210,6 @@ def get_video_document_by_id(video_mongo_id: str):
     except:
         return None
 
-def get_all_video_ids_for_course(course_code: str) -> List[str]:
-    """
-    Retrieves all Azure Video IDs associated with a specific course code.
-    """
-    try:
-        # Find the course document
-        course_doc = vi_courses.find_one({"course_code": course_code})
-        if not course_doc:
-            logger.warning(f"Course not found: {course_code}")
-            return []
-
-        # 2. Get list of video ObjectIds
-        video_oids = course_doc.get("videos", [])
-        if not video_oids:
-            return []
-
-        # Query video collection for Azure IDs
-        # We only want videos that have a valid 'video_id' (Azure ID)
-        cursor = vi_videos.find(
-            {"_id": {"$in": video_oids}, "video_id": {"$exists": True, "$ne": ""}},
-            {"video_id": 1}
-        )
-        
-        # Extract IDs
-        return [doc["video_id"] for doc in cursor]
-
-    except Exception as e:
-        logger.error(f"Error fetching video IDs for course {course_code}: {e}")
-        return []
-
 def delete_video_entry_from_db(video_mongo_id: str):
     """Removes video from Video collection and Course reference."""
     try:
@@ -227,7 +228,7 @@ def delete_video_entry_from_db(video_mongo_id: str):
         return False
 
 # --------------------------------------------------------------------------
-# 4. Robust Video Indexer Client (Added get_prompt_content)
+# 4. Robust Video Indexer Client (Updated with Async Prompt Content)
 # --------------------------------------------------------------------------
 class VideoIndexerClient:
     _instance = None 
@@ -329,7 +330,7 @@ class VideoIndexerClient:
         resp.raise_for_status()
         return resp.json().get('id')
 
-    def wait_for_index_async(self, video_id: str, timeout_sec: int = 4000) -> Dict:
+    def wait_for_index_async(self, video_id: str, timeout_sec: int = 1200) -> Dict:
         self.get_account_async()
         loc = self.account["location"]
         acc_id = self.account["properties"]["accountId"]
@@ -371,18 +372,79 @@ class VideoIndexerClient:
         
         return base64.b64encode(resp.content).decode('utf-8')
 
-    # --- NEW: Get Prompt Content (Insights) ---
-    def get_prompt_content(self, video_id: str) -> Dict:
+    # --- UPDATED: Async Prompt Content Logic ---
+    
+    def generate_prompt_content_async(self, video_id:str) -> None:
+        """
+        Initiate generation of new prompt content for the video.
+        (POST request)
+        """
         self.get_account_async()
         loc = self.account["location"]
         acc_id = self.account["properties"]["accountId"]
-        
-        url = f"{self.consts.ApiEndpoint}/{loc}/Accounts/{acc_id}/Videos/{video_id}/PromptContent"
+
+        url = f'{self.consts.ApiEndpoint}/{loc}/Accounts/{acc_id}/Videos/{video_id}/PromptContent'
+        headers = {"Content-Type": "application/json"}
         params = {'accessToken': self.vi_access_token}
+
+        response = requests.post(url, headers=headers, params=params)
+        response.raise_for_status()
+        logger.info(f"Prompt content generation for {video_id} started...")
+
+    def get_prompt_content_async(self, video_id:str, raise_on_not_found:bool=True) -> Optional[dict]:
+        """
+        Get the prompt content for the video (GET request).
+        """
+        self.get_account_async()
+        loc = self.account["location"]
+        acc_id = self.account["properties"]["accountId"]
+
+        url = f'{self.consts.ApiEndpoint}/{loc}/Accounts/{acc_id}/Videos/{video_id}/PromptContent'
+        headers = {"Content-Type": "application/json"}
+        params = {'accessToken': self.vi_access_token}
+
+        response = requests.get(url, params=params)
         
-        resp = requests.post(url, params=params) # The API might be POST
-        resp.raise_for_status()
-        return resp.json()
+        if response.status_code == 404:
+            if not raise_on_not_found:
+                return None
+            else:
+                # If we expect it to be there, raise 404
+                response.raise_for_status()
+        
+        response.raise_for_status()
+        return response.json()
+
+    def get_prompt_content(self, video_id:str, timeout_sec:Optional[int]=300, check_already_exists=True) -> Optional[dict]:
+        """
+        Polls until the prompt content is ready.
+        """
+        # 1. Check if exists
+        if check_already_exists:
+            prompt_content = self.get_prompt_content_async(video_id, raise_on_not_found=False)
+            if prompt_content is not None:
+                logger.info(f'Prompt content already exists for video ID {video_id}.')
+                return prompt_content
+
+        # 2. Generate
+        self.generate_prompt_content_async(video_id)
+
+        # 3. Poll
+        start_time = time.time()
+        while True:
+            prompt_content = self.get_prompt_content_async(video_id, raise_on_not_found=False)
+            
+            if prompt_content:
+                return prompt_content
+
+            if timeout_sec is not None and time.time() - start_time > timeout_sec:
+                logger.warning(f'Timeout of {timeout_sec} seconds reached waiting for PromptContent.')
+                break
+
+            logger.info('Prompt content is not ready yet. Waiting 10 seconds...')
+            time.sleep(10)
+            
+        return None
 
     def delete_video(self, video_id: str):
         self.get_account_async()
@@ -396,7 +458,7 @@ class VideoIndexerClient:
         resp.raise_for_status()
 
 # --------------------------------------------------------------------------
-# 5. Transcript Processor (Merged from TranscriptService)
+# 5. Transcript Processor
 # --------------------------------------------------------------------------
 def get_clean_prompt_template():
     return """
@@ -412,7 +474,6 @@ def get_clean_prompt_template():
     """
 
 def timestamp_to_seconds(timestamp_str: str) -> float:
-    # Format: 0:00:05.34 or 00:00:05.34
     try:
         parts = timestamp_str.split(':')
         seconds = float(parts[-1])
@@ -528,10 +589,9 @@ class TranscriptManager:
         responses_clean = []
         for chunk in chunks:
             cleaned = self.generate_clean_transcript(chunk, course_outline, video_desc)
-            # 'cleaned' might be a string or a dict result depending on chain version
             if isinstance(cleaned, str):
                 responses_clean.append(cleaned)
-            elif isinstance(cleaned, dict) and 'output_text' in cleaned: # Legacy chain return
+            elif isinstance(cleaned, dict) and 'output_text' in cleaned: 
                  responses_clean.append(cleaned['output_text'])
             else:
                  responses_clean.append(str(cleaned))
@@ -546,17 +606,25 @@ class TranscriptManager:
 
     def update_prompt_with_clean_transcript(self, video_object_id: ObjectId, video_id: str):
         """Merges cleaned transcript into Prompt Content structure and vectorizes it."""
-        # 1. Get Cleaned Transcript
         transcript_doc = vi_transcript_full.find_one({"video_reference_id": video_object_id})
         if not transcript_doc or "cleaned_transcript" not in transcript_doc:
             logger.warning("No cleaned transcript available.")
             return
 
-        # 2. Get Raw Prompt Content (Structure)
+        # NEW: Ensure prompt_doc is fetched if not passed in
         prompt_doc = vi_prompt_raw.find_one({"video_id": video_id})
         if not prompt_doc:
-            logger.warning("No raw prompt content available.")
-            return
+            logger.warning(f"No raw prompt content available in DB for {video_id}. Attempting fallback construction...")
+            # FALLBACK: Create a dummy prompt content structure from the raw transcript
+            # This handles cases where get_prompt_content failed but we have transcript
+            transcript = transcript_doc['cleaned_transcript']
+            prompt_doc = {
+                "result": {
+                    "sections": [
+                        {"content": transcript, "start": "0:00:00", "end": "0:00:00"}
+                    ]
+                }
+            }
 
         # 3. Merge Logic
         transcript = transcript_doc['cleaned_transcript']
@@ -565,34 +633,31 @@ class TranscriptManager:
         transcript_data = [{"time": timestamp_to_seconds(t), "text": txt.strip()} for t, txt in matches]
 
         if not transcript_data:
-            # Fallback if cleaning removed timestamps or format mismatch
             logger.warning("Cleaning removed timestamps, using raw merge.")
-            # Simplified merge could go here, or just skip
         
-        index = 0
         sections = prompt_doc.get("result", {}).get("sections", [])
-        for section in sections:
-            split_text = re.split(r"\[Transcript]", section.get("content", ""))
-            start_time = timestamp_to_seconds(section.get("start", "0:00:00.0"))
-            end_time = timestamp_to_seconds(section.get("end", "0:00:00.0"))
-            
-            pending_text = []
-            while index < len(transcript_data):
-                t_time = transcript_data[index]['time']
-                if start_time <= t_time <= end_time:
-                    ts_str = seconds_to_timestamp(t_time)
-                    pending_text.append(f"({ts_str}) {transcript_data[index]['text']}")
-                    index += 1
-                elif t_time < start_time:
-                    index += 1 # Skip outdated
-                else:
-                    break # belongs to next section
-            
-            # Reconstruct content with [Transcript] marker
-            prefix = split_text[0] if split_text else ""
-            section["content"] = f"{prefix} [Transcript] {' '.join(pending_text)}"
+        if sections and transcript_data:
+            index = 0
+            for section in sections:
+                split_text = re.split(r"\[Transcript]", section.get("content", ""))
+                start_time = timestamp_to_seconds(section.get("start", "0:00:00.0"))
+                end_time = timestamp_to_seconds(section.get("end", "0:00:00.0"))
+                
+                pending_text = []
+                while index < len(transcript_data):
+                    t_time = transcript_data[index]['time']
+                    if start_time <= t_time <= end_time:
+                        ts_str = seconds_to_timestamp(t_time)
+                        pending_text.append(f"({ts_str}) {transcript_data[index]['text']}")
+                        index += 1
+                    elif t_time < start_time:
+                        index += 1 
+                    else:
+                        break 
+                
+                prefix = split_text[0] if split_text else ""
+                section["content"] = f"{prefix} [Transcript] {' '.join(pending_text)}"
 
-        # 4. Ingest into Vector Store
         self.insert_prompt_context_index(prompt_doc, video_id)
 
     def insert_prompt_context_index(self, prompt_content_doc, video_id):
@@ -610,7 +675,7 @@ class TranscriptManager:
             ))
 
         if formatted_documents:
-            # Setup Vector Store Connection (Ephemeral for this operation)
+            # Use ChatHelper logic style for connection
             vector_store = AzureCosmosDBVectorSearch.from_connection_string(
                 connection_string=mongo_uri,
                 namespace=f"videoindexer.prompt_content_clean",
@@ -675,29 +740,46 @@ def index_video_and_update_metadata(
                 logger.warning(f"Thumbnail fetch failed: {e}")
 
         # 5. Get Prompt Content (Structured Insights)
+        prompt_content = None
         try:
-            prompt_content = client.get_prompt_content(vi_video_id)
-            # Save raw prompt content to DB
-            prompt_content["video_id"] = vi_video_id # Ensure ID is attached
-            vi_prompt_raw.insert_one(prompt_content)
+            # Uses the new robust method with poll logic
+            prompt_content = client.get_prompt_content(vi_video_id, timeout_sec=120)
+            if prompt_content:
+                # Save raw prompt content to DB
+                prompt_content["video_id"] = vi_video_id # Ensure ID is attached
+                vi_prompt_raw.insert_one(prompt_content)
+                logger.info(f"Saved Prompt Content for {vi_video_id}")
+            else:
+                logger.warning(f"Get Prompt Content returned empty for {vi_video_id}")
         except Exception as e:
             logger.error(f"Failed to get Prompt Content: {e}")
-            prompt_content = {}
 
         # 6. Transcript Processing Pipeline
         logger.info(f"Starting Transcript Pipeline for {vi_video_id}...")
         
-        # A. Map Insights -> Raw Transcript with Timestamps
-        tm.map_insights_to_transcript(insights, video_object_id)
+        # Verify if insights actually has transcript
+        has_transcript = False
+        if insights.get("videos"):
+            for v in insights["videos"]:
+                if v.get("insights", {}).get("transcript"):
+                    has_transcript = True
+                    break
         
-        # B. Clean Transcript (LLM)
-        tm.trigger_transcript_cleaning(video_object_id, course_doc, video_description)
-        
-        # C. Merge Clean Transcript -> Prompt Content & Ingest to Vector Store
-        if prompt_content:
-            tm.update_prompt_with_clean_transcript(video_object_id, vi_video_id)
+        if not has_transcript:
+            logger.error(f"CRITICAL: Azure Insights contains NO transcript for {vi_video_id}. Check if video has audio or if indexing failed.")
         else:
-            logger.warning("Skipping vector ingestion due to missing prompt content.")
+            tm.map_insights_to_transcript(insights, video_object_id)
+            
+            # B. Clean Transcript (LLM)
+            logger.info("Triggering transcript cleaning...")
+            tm.trigger_transcript_cleaning(video_object_id, course_doc, video_description)
+            
+            # C. Merge Clean Transcript -> Prompt Content & Ingest to Vector Store
+            if prompt_content:
+                logger.info(f"Merging clean transcript into Prompt Content and Ingesting for {vi_video_id}...")
+                tm.update_prompt_with_clean_transcript(video_object_id, vi_video_id)
+            else:
+                logger.warning("Skipping vector ingestion due to missing prompt content. Chat will likely fail for this video.")
 
         # 7. Mark Completed
         change_video_status(video_object_id, Status.COMPLETED)

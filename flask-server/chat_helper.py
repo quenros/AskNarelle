@@ -350,6 +350,7 @@ class ChatHelper:
                 m=16, ef_construction=64
             )
             self.prompt_collection.create_index([("metadata.video_id", 1)], name="metadata_video_id_index")
+            self.prompt_collection.create_index([("metadata.source", 1)], name="metadata_source_index") # Added source index
             self.prompt_collection.create_index([("textContent", "text")], name="prompt_text_index")
             logger.info("ChatHelper initialized successfully.")
         except Exception as e:
@@ -388,14 +389,9 @@ class ChatHelper:
 
     # --- Helper: ID Resolution ---
     def _resolve_video_ids(self, ids: list) -> list:
-        """
-        Converts a list of IDs (which might contain Mongo ObjectIds) 
-        into the correct Azure Video IDs needed for vector search.
-        """
         resolved_ids = []
         if not ids: return []
         
-        # Normalize input (handle dicts/objects)
         clean_ids = []
         if isinstance(ids, dict):
             clean_ids = list(ids.values())
@@ -403,7 +399,6 @@ class ChatHelper:
             clean_ids = ids
 
         for vid in clean_ids:
-            # Case 1: It's a Mongo ObjectId (e.g. from Frontend)
             if ObjectId.is_valid(vid):
                 try:
                     video_doc = self.video_collection.find_one({"_id": ObjectId(vid)})
@@ -412,31 +407,50 @@ class ChatHelper:
                         continue
                 except:
                     pass
-            
-            # Case 2: It's already an Azure ID (or lookup failed)
-            # We assume it is valid and add it directly.
             resolved_ids.append(vid)
             
-        return list(set(resolved_ids)) # Dedupe
+        return list(set(resolved_ids))
 
     # --- Retrieval Logic ---
 
     def retrieve_semantic_multivid(self, video_ids: list, query: str):
         if not video_ids: return []
         
-        # Resolve IDs before searching
         valid_ids = self._resolve_video_ids(video_ids)
         if not valid_ids: 
             logger.warning("No valid video IDs found for semantic search.")
             return []
         
-        # DEBUG: Check if data actually exists for these IDs
-        doc_count = self.prompt_collection.count_documents({"metadata.video_id": {"$in": valid_ids}})
-        if doc_count == 0:
-            logger.error(f"CRITICAL: No vector documents found in DB for IDs: {valid_ids}. Transcript ingestion may have failed.")
-            return []
+        logger.info(f"Executing Semantic Search for '{query}' on IDs: {valid_ids}")
+
+        # Diagnostic check for each ID
+        for vid in valid_ids:
+            count = self.prompt_collection.count_documents({"metadata.video_id": vid})
+            logger.info(f"Video ID '{vid}' has {count} vector documents in DB.")
+
+        # Standard Search by video_id
+        filter_query = {"metadata.video_id": {"$in": valid_ids}}
         
-        logger.info(f"Executing Semantic Search for '{query}' on IDs: {valid_ids} (Pool size: {doc_count} docs)")
+        doc_count = self.prompt_collection.count_documents(filter_query)
+        
+        if doc_count == 0:
+            logger.warning(f"No vectors found for video_ids: {valid_ids}. Trying fallback to filename...")
+            filenames = []
+            for vid in valid_ids:
+                v_doc = self.video_collection.find_one({"video_id": vid})
+                if v_doc and v_doc.get("name"):
+                    filenames.append(v_doc["name"])
+            
+            if filenames:
+                logger.info(f"Fallback searching for sources: {filenames}")
+                filter_query = {"metadata.source": {"$in": filenames}}
+                doc_count = self.prompt_collection.count_documents(filter_query)
+                if doc_count > 0:
+                    logger.info(f"Fallback search found {doc_count} docs via filename")
+        
+        if doc_count == 0:
+             logger.error("CRITICAL: No documents found even after fallback.")
+             return []
 
         pipeline = [{
             "$vectorSearch": {
@@ -445,8 +459,7 @@ class ChatHelper:
                 "queryVector": self.embeddings.embed_query(query),
                 "numCandidates": 10,
                 "limit": 20,
-                # Filter by ANY of the video IDs
-                "filter": {"metadata.video_id": {"$in": valid_ids}} 
+                "filter": filter_query 
             }},
             {
                 "$project": {
@@ -470,7 +483,8 @@ class ChatHelper:
         logger.info(f"Executing Text Search for '{query}' on IDs: {valid_ids}")
 
         try:
-            docs = self.prompt_collection.find(
+            # Try searching by ID first
+            docs = list(self.prompt_collection.find(
                 {
                     "$and": [
                         {"metadata.video_id": {"$in": valid_ids}},
@@ -478,7 +492,28 @@ class ChatHelper:
                     ]
                 },
                 {"textContent": 1, "metadata": 1, "score": {"$meta": "textScore"}}
-            ).sort("score", -1).limit(20)
+            ).sort("score", -1).limit(20))
+
+            if not docs:
+                # Fallback to source/name search if ID search yields nothing
+                filenames = []
+                for vid in valid_ids:
+                    v_doc = self.video_collection.find_one({"video_id": vid})
+                    if v_doc and v_doc.get("name"):
+                        filenames.append(v_doc["name"])
+                
+                if filenames:
+                    logger.info(f"Fallback text search for sources: {filenames}")
+                    docs = list(self.prompt_collection.find(
+                        {
+                            "$and": [
+                                {"metadata.source": {"$in": filenames}},
+                                {"$text": {"$search": query}}
+                            ]
+                        },
+                        {"textContent": 1, "metadata": 1, "score": {"$meta": "textScore"}}
+                    ).sort("score", -1).limit(20))
+
             results = list(docs)
             logger.info(f"Text Search Found {len(results)} docs")
             return results
@@ -501,8 +536,22 @@ class ChatHelper:
             end_seconds = timestamp_to_seconds(timestamps[1])
         
         try:
+            # Build filter query with potential fallback
+            filter_query = {"metadata.video_id": {"$in": valid_ids}}
+            
+            # Check if docs exist
+            count = self.prompt_collection.count_documents(filter_query)
+            if count == 0:
+                filenames = []
+                for vid in valid_ids:
+                    v_doc = self.video_collection.find_one({"video_id": vid})
+                    if v_doc and v_doc.get("name"):
+                        filenames.append(v_doc["name"])
+                if filenames:
+                    filter_query = {"metadata.source": {"$in": filenames}}
+
             cursor = self.prompt_collection.find(
-                {"metadata.video_id": {"$in": valid_ids}},
+                filter_query,
                 {"textContent": 1, "metadata": 1}
             )
             
