@@ -6,6 +6,7 @@ from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
 from azure.search.documents.indexes.models import  SearchIndex, SearchField, SearchFieldDataType, SimpleField, SearchableField, VectorSearch, VectorSearchProfile, HnswAlgorithmConfiguration
+from azure.search.documents.models import VectorizedQuery
 from langchain.text_splitter import CharacterTextSplitter
 from pathlib import Path
 from dotenv import load_dotenv
@@ -28,14 +29,8 @@ embeddings = AzureOpenAIEmbeddings(
             azure_deployment="text-embedding-ada-002", 
             api_key=os.environ.get('AZURE_OPENAI_API_KEY'),
             azure_endpoint=os.environ.get('AZURE_OPENAI_ENDPOINT'),
-            model='text-embedding-ada-002'
-        )
-
-sample_text = "Embeddings dimension finder"
-embedding_vector = embeddings.embed_query(sample_text)
-
-embedding_dimenison = len(embedding_vector)
-
+            model='text-embedding-ada-002',
+)
 
 # def storeDocuments(containername, chunksize, overlap):
 #     try:
@@ -383,7 +378,7 @@ def moveToVectorStoreFunction(containername, domainname, chunksize, overlap, fil
 
 
     
-def  createIndexFunction(collection_name):
+def createIndexFunction(collection_name):
     try:
         client = SearchIndexClient(os.environ.get('AZURE_COGNITIVE_SEARCH_ENDPOINT'), AzureKeyCredential(os.environ.get('AZURE_COGNITIVE_SEARCH_API_KEY')))
 
@@ -470,3 +465,45 @@ def delete_embeddings_function(blobName, collection_name):
         print(f"An error occurred: {e}")
         return False
 
+
+def search_documents(collection_name, query, top_k=3, score_threshold=0.01):
+    """
+    Search the Azure AI Search index for relevant document chunks.
+    Returns a list of content strings if matches are found above the threshold.
+    """
+    try:
+        service_endpoint = os.environ.get('AZURE_COGNITIVE_SEARCH_ENDPOINT')
+        key = os.environ.get('AZURE_COGNITIVE_SEARCH_API_KEY')
+        
+        search_client = SearchClient(service_endpoint, collection_name, AzureKeyCredential(key))
+        
+        # Generate embedding for the query
+        query_vector = embeddings.embed_query(query)
+        
+        vector_query = VectorizedQuery(vector=query_vector, k_nearest_neighbors=top_k, fields="content_vector")
+        
+        results = search_client.search(
+            search_text=query,
+            vector_queries=[vector_query],
+            select=["content", "filename"],
+            top=top_k
+        )
+        
+        matches = []
+        print(f"DEBUG: querying index '{collection_name}' for '{query}'") # Log query info
+        for result in results:
+            # Check score if available (Azure Search scores can vary, usually > 0.8 is good for cosine)
+            score = result.get('@search.score', 0)
+            print(f"DEBUG: Found doc '{result['filename']}' with score: {score}") # Log found doc and score
+            # Lowered threshold or logic adjustment
+            if score >= score_threshold:
+                # Format clearly for the LLM
+                matches.append(f"[Document Source: {result['filename']}]\nContent: {result['content']}")
+            else:
+                print(f"DEBUG: Doc '{result['filename']}' skipped due to low score.")
+
+        return matches
+
+    except Exception as e:
+        print(f"Document search error: {e}")
+        return []

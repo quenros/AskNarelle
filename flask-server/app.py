@@ -47,6 +47,7 @@ from ai_search_helper import (
     createIndexFunction,
     delete_index_function,
     delete_embeddings_function,
+    search_documents
 )
 # from ai_search_helper_local import (storeDocuments, moveToVectorStoreFunction, createIndexFunction, delete_index_function, delete_embeddings_function)
 from video_indexer_helper import (
@@ -59,7 +60,7 @@ from video_indexer_helper import (
     get_course_videos_manage,
     get_all_video_ids_for_course,
     VideoIndexerClient,
-    VideoDetails
+    VideoDetails,
 )
 
 from chat_helper import chat_client, ChatRequestBody
@@ -1049,8 +1050,8 @@ def chat_with_video(video_id):
 @app.route("/api/chat/course", methods=["POST"])
 def chat_with_course():
     """
-    Unified Endpoint for Chatting with Course OR Specific Videos.
-    Expects JSON body: { "message": "...", "course_code": "...", "video_ids": ["..."] }
+    Unified Endpoint for Chatting with Course (Docs + Video).
+    Flow: Docs -> Video
     """
     try:
         data = request.get_json()
@@ -1058,28 +1059,42 @@ def chat_with_course():
         
         target_video_ids = body.video_ids
         course_code = body.course_code
+        message = body.message
 
-        # Logic:
-        # If video_ids are provided, use them.
-        # If video_ids are missing but course_code is present, fetch all videos for that course.
+        # 1. Search Documents (Azure AI Search)
+        # Note: 'course_code' matches your 'containername' / index name in AI Search
+        print(f"Searching documents for course: {course_code}...")
+        # Use a reasonable threshold (0.65 - 0.7) for ADA-002 models
+        doc_matches = search_documents(course_code, message, top_k=3, score_threshold=0.01)
+        
+        if doc_matches:
+            print(f"Found {len(doc_matches)} document matches. Generating answer from docs...")
+            answer = chat_client.generate_answer_from_docs(
+                context_list=doc_matches,
+                message=message,
+                previous_messages=body.previous_messages
+            )
+            if answer:
+                return jsonify({"answer": answer, "source": "documents"}), 200
+        
+        # 2. Fallback to Video Search (Existing Logic)
+        print("No sufficient document matches. Falling back to Video Indexer...")
+        
         if not target_video_ids and course_code:
-            print(f"No video_ids provided. Fetching all videos for course: {course_code}")
             target_video_ids = get_all_video_ids_for_course(course_code)
-            print(target_video_ids)
             
             if not target_video_ids:
-                return jsonify({"answer": f"I couldn't find any processed videos for course {course_code}. Please upload videos first."}), 200
+                # If both docs and videos fail
+                return jsonify({"answer": f"I couldn't find any relevant documents or processed videos for course {course_code}."}), 200
 
-        print(body.message, target_video_ids, course_code)
-        # 3. Call ChatHelper with the resolved list of IDs
         answer = chat_client.generate_response(
-            message=body.message, 
+            message=message, 
             previous_messages=body.previous_messages,
             video_ids=target_video_ids,
-            course_code=course_code # Pass this for routing logic if needed
+            course_code=course_code
         )
         
-        return jsonify({"answer": answer}), 200
+        return jsonify({"answer": answer, "source": "video"}), 200
 
     except Exception as e:
         print(f"Chat error: {e}")

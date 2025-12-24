@@ -118,9 +118,7 @@ def seconds_to_timestamp(seconds):
 # --------------------------------------------------------------------------
 def get_prompt_template():
     return """
-    You are an AI assistant that answers questions based on detailed video context. The context includes:
-
-    - **Transcripts** with timestamps quoted by "(" and ")".
+    You are an AI assistant that answers questions based on detailed context. The context may include video transcripts or document excerpts.
     
     **Instructions:**
     
@@ -129,8 +127,8 @@ def get_prompt_template():
     
     2. **Use Relevant Context:**
        - Search through the provided context to find information that directly answers the question.
-       - Reference specific timestamps (in **mm:ss** format) when mentioning parts of the video.
-       - For every important information, I want you to quote the timestamp in this format ONLY: "Covered at [mm:ss]"
+       - If the context comes from a video (contains timestamps like [mm:ss]), you may reference the timestamp if relevant.
+       - If the context is from a document, simply cite the information source (e.g., "According to [Filename]...").
     
     3. **Compose a Clear and Concise Answer:**
        - Provide the information in a straightforward manner.
@@ -140,7 +138,7 @@ def get_prompt_template():
     
     4. **Formatting Guidelines:**
        - Begin your answer by addressing the user's question.
-       - State the video title in your answer. Be specific where you got the context from.
+       - State the source (Video Title or Document Name) in your answer. Be specific where you got the context from.
        
     **History:**
     
@@ -158,14 +156,15 @@ def get_prompt_template():
     """
 
 def get_prompt_temporal_question():
-    return """You are an assistant that specializes in analyzing questions about lecture videos.
+    return """You are an assistant that specializes in analyzing questions about course materials (videos and documents).
 
-    Given a user question, determine whether it is **temporal**, meaning it refers to a specific point or time in the video (e.g., 'at 0:5:00', 'before the end', 'around 20 minutes in').
+    Given a user question, determine whether it is **temporal**, meaning it refers to a specific point or time in a **video** (e.g., 'at 0:5:00', 'before the end', 'around 20 minutes in').
 
     ### Instructions:
-    1. First, check if the question is temporal AND it is possible to derive an appropriate timestamp.
-    2. If YES, extract the timestamp mentioned in the question (e.g., 0:05:00, 1:27:30).
-    3. If NO, return "not a temporal question".
+    1. First, check if the question refers to a specific time.
+    2. If it refers to a document (e.g., "in the pdf", "on page 5"), it is **NOT** temporal in the context of video playback.
+    3. If YES (video time), extract the timestamp mentioned in the question (e.g., 0:05:00, 1:27:30).
+    4. If NO, return "not a temporal question".
 
     ### Format your response strictly as:
     {{
@@ -182,7 +181,7 @@ def get_prompt_temporal_question():
     }}
 
     ### Example 2:
-    Question: "What are the learning outcomes of this course?"
+    Question: "What does the syllabus pdf say about grading?"
     Response:
     {{
     "is_temporal": false,
@@ -190,7 +189,7 @@ def get_prompt_temporal_question():
     }}
 
     ### Example 3:
-    Question: "What was mentioned toward the end?"
+    Question: "What are the learning outcomes of this course?"
     Response:
     {{
     "is_temporal": false,
@@ -719,5 +718,36 @@ class ChatHelper:
         except Exception as e:
             logger.error(f"Generation error: {e}")
             return "Error generating response."
+
+    def generate_answer_from_docs(self, context_list: List[str], message: str, previous_messages: list = None):
+            """
+            Generates an answer using provided text strings (from Documents) as context.
+            """
+            if not context_list:
+                return None 
+
+            # Convert simple strings to LangChain Documents for the chain
+            docs = [Document(page_content=txt) for txt in context_list]
+
+            formatted_history = "\n".join(
+                [f"User: {msg.user_input}\nAssistant: {msg.assistant_response}" for msg in (previous_messages or [])]
+            )
+
+            prompt = PromptTemplate(
+                template=get_prompt_template(),
+                input_variables=["context", "input", "history"]
+            )
+
+            chain = create_stuff_documents_chain(self.chat_model, prompt)
+            
+            try:
+                return chain.invoke({
+                    "context": docs,
+                    "input": message,
+                    "history": formatted_history
+                })
+            except Exception as e:
+                logger.error(f"Doc Generation error: {e}")
+                return None
 
 chat_client = ChatHelper()
