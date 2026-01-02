@@ -1065,7 +1065,7 @@ def chat_with_course():
         # Note: 'course_code' matches your 'containername' / index name in AI Search
         print(f"Searching documents for course: {course_code}...")
         # Use a reasonable threshold (0.65 - 0.7) for ADA-002 models
-        doc_matches = search_documents(course_code, message, top_k=3, score_threshold=0.01)
+        doc_matches = search_documents(course_code, message, top_k=3, score_threshold=5)
         
         if doc_matches:
             print(f"Found {len(doc_matches)} document matches. Generating answer from docs...")

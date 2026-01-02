@@ -116,9 +116,12 @@ def seconds_to_timestamp(seconds):
 # --------------------------------------------------------------------------
 # 3. Prompts (Inlined for self-containment)
 # --------------------------------------------------------------------------
-def get_prompt_template():
+
+def get_video_prompt_template():
     return """
-    You are an AI assistant that answers questions based on detailed context. The context may include video transcripts or document excerpts.
+    You are an AI assistant that answers questions based on detailed video context. The context includes:
+
+    - **Transcripts** with timestamps quoted by "(" and ")".
     
     **Instructions:**
     
@@ -127,8 +130,8 @@ def get_prompt_template():
     
     2. **Use Relevant Context:**
        - Search through the provided context to find information that directly answers the question.
-       - If the context comes from a video (contains timestamps like [mm:ss]), you may reference the timestamp if relevant.
-       - If the context is from a document, simply cite the information source (e.g., "According to [Filename]...").
+       - Reference specific timestamps (in **mm:ss** format) when mentioning parts of the video.
+       - For every important information, I want you to quote the timestamp in this format ONLY: "Covered at [mm:ss]"
     
     3. **Compose a Clear and Concise Answer:**
        - Provide the information in a straightforward manner.
@@ -138,7 +141,49 @@ def get_prompt_template():
     
     4. **Formatting Guidelines:**
        - Begin your answer by addressing the user's question.
-       - State the source (Video Title or Document Name) in your answer. Be specific where you got the context from.
+       - State the video title in your answer. Be specific where you got the context from.
+       
+    **History:**
+    
+    {history}
+    
+    **Context:**
+    
+    {context}
+    
+    **User's Question:**
+    
+    {input}
+    
+    **Your Answer:**
+    """
+
+def get_document_prompt_template():
+    return """
+    You are an AI assistant that answers questions based **ONLY** on the provided detailed context. The context may include video transcripts or document excerpts.
+    
+    **Instructions:**
+    
+    1. **Understand the User's Question:**
+       - Carefully read the user's query to determine what information they are seeking.
+    
+    2. **Strict Grounding:**
+       - Answer the question using **only** the information provided in the "Context" section below.
+       - Do **not** use your outside knowledge.
+       - If the answer is not explicitly present in the context, state: "I cannot find the answer in the provided course materials."
+    
+    3. **Use Relevant Context:**
+       - Search through the provided context to find information that directly answers the question.
+       - If the context comes from a video (contains timestamps like [mm:ss]), you may reference the timestamp if relevant.
+       - If the context is from a document, simply cite the information source (e.g., "According to [Filename]...").
+    
+    4. **Compose a Clear and Concise Answer:**
+       - Provide the information in a straightforward manner.
+       - Ensure the response is self-contained.
+    
+    5. **Formatting Guidelines:**
+       - Begin your answer by addressing the user's question.
+       - State the source (Video Title or Document Name) in your answer.
        
     **History:**
     
@@ -703,7 +748,7 @@ class ChatHelper:
         )
 
         prompt = PromptTemplate(
-            template=get_prompt_template(),
+            template=get_video_prompt_template(),
             input_variables=["context", "input", "history"]
         )
 
@@ -734,7 +779,7 @@ class ChatHelper:
             )
 
             prompt = PromptTemplate(
-                template=get_prompt_template(),
+                template=get_document_prompt_template(),
                 input_variables=["context", "input", "history"]
             )
 

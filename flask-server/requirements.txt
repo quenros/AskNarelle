@@ -34,3 +34,4 @@ schedule~=1.2.2
 pydantic>=2.9.2,<3
 cffi
 cryptography>=42
+gunicorn

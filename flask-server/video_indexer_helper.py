@@ -214,18 +214,61 @@ def get_video_document_by_id(video_mongo_id: str):
         return None
 
 def delete_video_entry_from_db(video_mongo_id: str):
-    """Removes video from Video collection and Course reference."""
+    """
+    Removes video from Video collection and Course reference.
+    Also cleans up all related collections:
+    - transcript_full (by video_reference_id)
+    - video_indexer_raw (by video_indexer_id)
+    - prompt_content_raw (by video_id)
+    - prompt_content_clean (by metadata.video_id)
+    """
     try:
         vid_oid = ObjectId(video_mongo_id)
-        video_doc = vi_videos.find_one({"_id": vid_oid})
-        if not video_doc: return False
         
+        # Get the Video Document first to find the Azure Video ID
+        video_doc = vi_videos.find_one({"_id": vid_oid})
+        if not video_doc:
+            logger.warning(f"Video document {video_mongo_id} not found in DB.")
+            return False
+        
+        azure_video_id = video_doc.get("video_id") # The external ID (e.g., 5wzo7q39al)
+        
+        # Delete from Course Reference
         course_ref_id = video_doc.get("course_reference_id")
         if course_ref_id:
             vi_courses.update_one({"_id": course_ref_id}, {"$pull": {"videos": vid_oid}})
+            logger.info(f"Removed reference to {video_mongo_id} from course {course_ref_id}")
+
+        # Delete from Related Collections
         
+        # transcript_full: Linked by video_reference_id (Mongo ID)
+        res_transcript = vi_transcript_full.delete_many({"video_reference_id": vid_oid})
+        logger.info(f"Deleted {res_transcript.deleted_count} docs from transcript_full")
+
+        # Collections linked by Azure Video ID
+        if azure_video_id:
+            # video_indexer_raw: Linked by video_indexer_id
+            res_raw = vi_raw.delete_many({"video_indexer_id": azure_video_id})
+            logger.info(f"Deleted {res_raw.deleted_count} docs from video_indexer_raw")
+
+            # prompt_content_raw: Linked by video_id
+            res_prompt_raw = vi_prompt_raw.delete_many({"video_id": azure_video_id})
+            logger.info(f"Deleted {res_prompt_raw.deleted_count} docs from prompt_content_raw")
+
+            # prompt_content_clean: Linked by metadata.video_id
+            # Note: This is the vector store.
+            res_prompt_clean = vi_prompt_clean.delete_many({"metadata.video_id": azure_video_id})
+            logger.info(f"Deleted {res_prompt_clean.deleted_count} docs from prompt_content_clean")
+            
+            # If you have a 'prompt_content_index' collection, add it here:
+            # vi_prompt_index.delete_many({"video_id": azure_video_id}) 
+
+        # Delete the Video Document itself
         vi_videos.delete_one({"_id": vid_oid})
+        logger.info(f"Deleted video document {video_mongo_id}")
+        
         return True
+
     except Exception as e:
         logger.error(f"Error deleting video DB entry: {e}")
         return False

@@ -410,7 +410,7 @@ def createIndexFunction(collection_name):
             name="content_vector", #content_vector
             type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
             searchable=True, 
-            vector_search_dimensions= embedding_dimenison, 
+            # vector_search_dimensions= embedding_dimenison, 
             vector_search_profile_name="my-vector-config"),
 
         SearchableField(
@@ -466,10 +466,10 @@ def delete_embeddings_function(blobName, collection_name):
         return False
 
 
-def search_documents(collection_name, query, top_k=3, score_threshold=0.01):
+def search_documents(collection_name, query, top_k=3, score_threshold=5):
     """
-    Search the Azure AI Search index for relevant document chunks.
-    Returns a list of content strings if matches are found above the threshold.
+    Performs a Keyword-Only search (BM25) on Azure AI Search.
+    Useful for finding specific terms or filenames.
     """
     try:
         service_endpoint = os.environ.get('AZURE_COGNITIVE_SEARCH_ENDPOINT')
@@ -477,33 +477,26 @@ def search_documents(collection_name, query, top_k=3, score_threshold=0.01):
         
         search_client = SearchClient(service_endpoint, collection_name, AzureKeyCredential(key))
         
-        # Generate embedding for the query
-        query_vector = embeddings.embed_query(query)
-        
-        vector_query = VectorizedQuery(vector=query_vector, k_nearest_neighbors=top_k, fields="content_vector")
-        
+        # Keyword Search ONLY (No vectors)
         results = search_client.search(
             search_text=query,
-            vector_queries=[vector_query],
             select=["content", "filename"],
             top=top_k
         )
         
         matches = []
-        print(f"DEBUG: querying index '{collection_name}' for '{query}'") # Log query info
+        print(f"DEBUG: Keyword search index '{collection_name}' for '{query}'")
         for result in results:
-            # Check score if available (Azure Search scores can vary, usually > 0.8 is good for cosine)
             score = result.get('@search.score', 0)
-            print(f"DEBUG: Found doc '{result['filename']}' with score: {score}") # Log found doc and score
-            # Lowered threshold or logic adjustment
+            print(f"DEBUG: Found doc '{result['filename']}' with score: {score}")
+            
             if score >= score_threshold:
-                # Format clearly for the LLM
                 matches.append(f"[Document Source: {result['filename']}]\nContent: {result['content']}")
             else:
-                print(f"DEBUG: Doc '{result['filename']}' skipped due to low score.")
-
+                print(f"DEBUG: Keyword Doc '{result['filename']}' skipped due to low score ({score} < {score_threshold}).")
+                
         return matches
 
     except Exception as e:
-        print(f"Document search error: {e}")
+        print(f"Keyword search error: {e}")
         return []
