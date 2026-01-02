@@ -2,8 +2,8 @@ langchain
 openai
 python-dotenv
 azure-storage-blob
-unstructured
-unstructured[xlsx]
+# unstructured
+# unstructured[xlsx]
 azure-search-documents
 langchain-community
 Flask
