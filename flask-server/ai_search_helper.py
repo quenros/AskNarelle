@@ -16,10 +16,6 @@ from langchain.docstore.document import Document
 from common_helper import read_docx, read_pdf, read_pptx, read_txt
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
 
-import chromadb
-from chromadb.config import Settings
-from langchain_community.embeddings import HuggingFaceEmbeddings
-
 load_dotenv()
 
 blob_service_client = BlobServiceClient.from_connection_string(os.environ.get('AZURE_CONN_STRING'))

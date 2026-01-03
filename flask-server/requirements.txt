@@ -1,43 +1,20 @@
-# Core Framework
-
-Flask
-flask-cors
-gunicorn
+langchain==0.3.27
+langchain-community==0.3.31
+langchain-openai==0.3.35
+langchain-text-splitters==0.3.11
+openai
 python-dotenv
-requests~=2.32.3
-schedule~=1.2.2
-pytz
-
-# Database
-
-pymongo~=4.11.1
-dnspython
-
-# Azure SDKs
-
 azure-storage-blob
 azure-search-documents
-azure-identity~=1.20.0
-
-# azure-ai-vision-imageanalysis~=1.0.0  <-- Uncomment only if strictly needed
-
-# AI & LangChain (Orchestration only, no local models)
-
-openai
-langchain
-langchain-community
-langchain-openai~=0.3.6
-langchain-text-splitters~=0.3.6
-
-# Document Processing (Lightweight parsers only)
-
+Flask
+flask-cors
+pymongo~=4.11.1
+pytz
 python-docx
 python-pptx
 PyMuPDF
-
-# Utilities & Security
-
+gunicorn
+requests~=2.32.3
+schedule~=1.2.2
 pydantic>=2.9.2,<3
-bcrypt~=4.3.0
-cryptography>=42
-cffi
+azure-identity~=1.20.0
