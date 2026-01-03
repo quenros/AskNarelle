@@ -101,6 +101,28 @@ def storeInVectorStore():
 
 TEXT_EXTS = {".pdf", ".docx", ".pptx", ".txt"}
 
+@app.route("/api/test", methods=["GET", "POST"])
+def test_endpoint():
+    """
+    Simple health check to verify deployment and payload handling.
+    """
+    if request.method == "GET":
+        return jsonify({
+            "status": "success",
+            "message": "Backend is reachable!",
+            "timestamp": datetime.now().isoformat()
+        }), 200
+    
+    if request.method == "POST":
+        try:
+            data = request.get_json()
+            return jsonify({
+                "status": "success",
+                "received_data": data,
+                "message": "POST request handled successfully."
+            }), 200
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 400
 
 @app.route("/movetovectorstore", methods=["PUT"])
 def moveToVectorStore():
