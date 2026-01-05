@@ -69,24 +69,25 @@ const ChatPage: React.FC = () => {
     setLoading(true);
 
     setUiMessages((prev) => [...prev, { role: "user", content: userMsg }]);
-
+    
     try {
-      // Construct Payload matching ChatRequestBody
-      const payload: any = {
+      let url = "";
+      let payload: any = {
         previous_messages: apiHistory,
         message: userMsg,
-        course_code: course, // Always send course context
-        video_ids: [] // Default empty
+        video_ids: [] 
       };
 
-      // Determine Endpoint & specific params
-      let url = `http://localhost:5000/api/chat/course`; 
-
-      if (!isCourseChat) {
-        // Single Video Context
-        payload.video_ids = [videoId]; 
-      } 
-      // Else: Leave video_ids empty -> Backend will fetch all videos for 'course_code'
+      if (isCourseChat) {
+        // UPDATED: Pass course code in the URL path
+        url = `http://localhost:5000/api/chat/${encodeURIComponent(course)}`;
+      } else {
+        // Single Video Endpoint (You might want to update this too to follow the pattern, 
+        // but for now keeping it as is or redirecting to the main one with specific video_ids)
+        // If you want to use the unified endpoint for single videos too:
+        url = `http://localhost:5000/api/chat/${encodeURIComponent(course)}`;
+        payload.video_ids = [videoId];
+      }
 
       const res = await fetch(url, {
         method: "POST",
@@ -100,7 +101,6 @@ const ChatPage: React.FC = () => {
       const botResponse = data.answer || "Sorry, I couldn't understand that.";
 
       setUiMessages((prev) => [...prev, { role: "assistant", content: botResponse }]);
-      
       setApiHistory((prev) => [
         ...prev,
         { user_input: userMsg, assistant_response: botResponse },

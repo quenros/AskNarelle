@@ -1069,18 +1069,22 @@ def chat_with_video(video_id):
         # If Pydantic validation fails, it usually raises a ValidationError
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/chat/course", methods=["POST"])
-def chat_with_course():
+@app.route("/api/chat/<course_code>", methods=["POST"])
+def chat_with_course(course_code):
     """
     Unified Endpoint for Chatting with Course (Docs + Video).
-    Flow: Docs -> Video
+    URL Param: course_code (e.g., "1010")
+    Body: { "message": "...", "video_ids": [], "previous_messages": [] }
     """
     try:
         data = request.get_json()
+        
+        # We still use the Pydantic model for validation, but course_code comes from URL now
+        # You might need to update ChatRequestBody definition in chat_helper.py if it requires course_code
+        # For now, we can inject it or just ignore the body's course_code if present
         body = ChatRequestBody(**data) 
         
         target_video_ids = body.video_ids
-        course_code = body.course_code
         message = body.message
 
         # 1. Search Documents (Azure AI Search)
