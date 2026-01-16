@@ -30,6 +30,8 @@ const CourseCard: React.FC<CourseProps> = ({
   const [totalFiles, setTotalFiles] = useState<number>(0);
 
   useEffect(() => {
+    if (!courseName) return;
+    
     fetch(`http://localhost:5000/api/${courseName}/totalFiles`)
       .then((response) => {
         if (!response.ok) throw new Error("Failed to fetch collections");

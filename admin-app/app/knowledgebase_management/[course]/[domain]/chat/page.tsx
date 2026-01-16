@@ -2,6 +2,8 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { PublicClientApplication } from "@azure/msal-browser"; // Import MSAL
+import { msalConfig } from "@/authConfig"; // Import config
 import {
   Layout,
   Input,
@@ -24,6 +26,10 @@ import {
 const { Header, Content, Footer } = Layout;
 const { Text, Title } = Typography;
 
+// Initialize MSAL instance
+const msalInstance = new PublicClientApplication(msalConfig);
+
+// --- Interfaces matching your Backend ---
 interface ChatHistory {
   user_input: string;
   assistant_response: string;
@@ -36,22 +42,36 @@ interface ChatMessage {
 
 const ChatPage: React.FC = () => {
   const router = useRouter();
+  
+  // 1. Get Path Params (Course/Domain)
   const params = useParams();
+  // Ensure we decode the params in case they are URL encoded
   const course = decodeURIComponent(String(params?.course || ""));
   const domain = decodeURIComponent(String(params?.domain || ""));
 
+  // 2. Get Query Params (Video ID / Name)
   const searchParams = useSearchParams();
   const videoId = searchParams.get("id") || "";
   const videoName = searchParams.get("name"); 
 
+  // 3. Get User ID from MSAL
+  const accounts = msalInstance.getAllAccounts();
+  const userId = accounts?.[0]?.username || "anonymous";
+
+  // Determine Chat Mode
   const isCourseChat = !videoId;
   const chatTitle = isCourseChat ? `Course Chat: ${course}` : (videoName || "Video Chat");
 
   const [loading, setLoading] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [inputText, setInputText] = useState("");
+  
+  // UI State for the list
   const [uiMessages, setUiMessages] = useState<ChatMessage[]>([]);
+  // API State for the history buffer
   const [apiHistory, setApiHistory] = useState<ChatHistory[]>([]);
 
+  // Auto-scroll logic
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -61,32 +81,85 @@ const ChatPage: React.FC = () => {
     scrollToBottom();
   }, [uiMessages]);
 
+  // --- NEW: Fetch Chat History on Mount ---
+  useEffect(() => {
+    const fetchHistory = async () => {
+        if (!course || !userId || userId === "anonymous") return;
+        
+        setHistoryLoading(true);
+        try {
+            const res = await fetch(`http://localhost:5000/api/chat/history/${encodeURIComponent(course)}?user_id=${encodeURIComponent(userId)}`);
+            if (res.ok) {
+                const data = await res.json();
+                const history = data.history || [];
+                
+                // 1. Format for UI
+                const formattedUI: ChatMessage[] = history.map((msg: any) => ({
+                    role: msg.role,
+                    content: msg.content
+                }));
+                setUiMessages(formattedUI);
+
+                // 2. Format for API Context (ChatHistory format)
+                // We need to pair user/assistant messages for the ChatHistory object
+                // This is a naive pairing assuming strict alternating order, which might not always hold
+                // Ideally, the backend manages history now so we might not strictly need to send this full list back
+                // if we are using session-based context.
+                // But to keep compatibility with your ChatHelper's previous_messages logic:
+                const pairedHistory: ChatHistory[] = [];
+                for (let i = 0; i < history.length - 1; i += 2) {
+                    if (history[i].role === 'user' && history[i+1].role === 'assistant') {
+                        pairedHistory.push({
+                            user_input: history[i].content,
+                            assistant_response: history[i+1].content
+                        });
+                    }
+                }
+                setApiHistory(pairedHistory);
+            }
+        } catch (error) {
+            console.error("Failed to load chat history:", error);
+        } finally {
+            setHistoryLoading(false);
+        }
+    };
+
+    fetchHistory();
+  }, [course, userId]);
+
   const handleSend = async () => {
     if (!inputText.trim()) return;
+
+    // Safety check for video mode
+    if (!isCourseChat && !videoId) {
+        antMessage.error("Missing Video ID.");
+        return;
+    }
 
     const userMsg = inputText;
     setInputText("");
     setLoading(true);
 
+    // 1. Optimistic UI Update
     setUiMessages((prev) => [...prev, { role: "user", content: userMsg }]);
-    
+
     try {
       let url = "";
+      // Construct payload based on your backend 'ChatRequestBody' model
       let payload: any = {
-        previous_messages: apiHistory,
+        previous_messages: apiHistory, 
         message: userMsg,
-        video_ids: [] 
+        user_id: userId, 
       };
 
       if (isCourseChat) {
-        // UPDATED: Pass course code in the URL path
+        // Course Chat Endpoint
         url = `http://localhost:5000/api/chat/${encodeURIComponent(course)}`;
       } else {
-        // Single Video Endpoint (You might want to update this too to follow the pattern, 
-        // but for now keeping it as is or redirecting to the main one with specific video_ids)
-        // If you want to use the unified endpoint for single videos too:
-        url = `http://localhost:5000/api/chat/${encodeURIComponent(course)}`;
-        payload.video_ids = [videoId];
+        // Single Video Endpoint
+        url = `http://localhost:5000/chat/${encodeURIComponent(videoId)}`;
+        payload.course_code = course; 
+        payload.user_id = userId;
       }
 
       const res = await fetch(url, {
@@ -100,7 +173,10 @@ const ChatPage: React.FC = () => {
       const data = await res.json();
       const botResponse = data.answer || "Sorry, I couldn't understand that.";
 
+      // 4. Update UI with Bot Response
       setUiMessages((prev) => [...prev, { role: "assistant", content: botResponse }]);
+      
+      // 5. Update History
       setApiHistory((prev) => [
         ...prev,
         { user_input: userMsg, assistant_response: botResponse },
@@ -116,6 +192,7 @@ const ChatPage: React.FC = () => {
 
   return (
     <Layout style={{ height: "100vh", background: "#fff" }}>
+      {/* --- HEADER --- */}
       <Header
         style={{
           background: "#fff",
@@ -150,6 +227,7 @@ const ChatPage: React.FC = () => {
         </div>
       </Header>
 
+      {/* --- CHAT CONTENT --- */}
       <Content
         style={{
           padding: "24px",
@@ -160,7 +238,8 @@ const ChatPage: React.FC = () => {
         }}
       >
         <div style={{ width: "100%", maxWidth: 800 }}>
-          {uiMessages.length === 0 && (
+          {/* Welcome Empty State */}
+          {uiMessages.length === 0 && !historyLoading && (
             <div style={{ textAlign: "center", marginTop: 80, opacity: 0.6 }}>
               <div style={{ 
                   width: 80, height: 80, background: '#e6f7ff', borderRadius: '50%', 
@@ -177,7 +256,14 @@ const ChatPage: React.FC = () => {
               </Text>
             </div>
           )}
+          
+          {historyLoading && (
+             <div style={{ padding: "20px 0", textAlign: "center" }}>
+               <Spin tip="Loading chat history..." />
+             </div>
+          )}
 
+          {/* Message List */}
           <List
             itemLayout="horizontal"
             dataSource={uiMessages}
@@ -225,6 +311,7 @@ const ChatPage: React.FC = () => {
         </div>
       </Content>
 
+      {/* --- FOOTER INPUT --- */}
       <Footer
         style={{
           background: "#fff",

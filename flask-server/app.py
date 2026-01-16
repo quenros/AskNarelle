@@ -1074,50 +1074,56 @@ def chat_with_course(course_code):
     """
     Unified Endpoint for Chatting with Course (Docs + Video).
     URL Param: course_code (e.g., "1010")
-    Body: { "message": "...", "video_ids": [], "previous_messages": [] }
+    Body: { "message": "...", "video_ids": [], "previous_messages": [], "user_id": "..." }
     """
     try:
         data = request.get_json()
         
         # We still use the Pydantic model for validation, but course_code comes from URL now
-        # You might need to update ChatRequestBody definition in chat_helper.py if it requires course_code
-        # For now, we can inject it or just ignore the body's course_code if present
         body = ChatRequestBody(**data) 
         
         target_video_ids = body.video_ids
         message = body.message
+        user_id = body.user_id # Extract user_id from body
 
         # 1. Search Documents (Azure AI Search)
-        # Note: 'course_code' matches your 'containername' / index name in AI Search
         print(f"Searching documents for course: {course_code}...")
         # Use a reasonable threshold (0.65 - 0.7) for ADA-002 models
-        doc_matches = search_documents(course_code, message, top_k=3, score_threshold=5)
+        doc_matches = search_documents(course_code, message, top_k=3, score_threshold=0.65)
         
+        # Log the matches found
+        print(f"Document matches found: {len(doc_matches)}")
+        for match in doc_matches:
+            print(f" - {match[:100]}...") # Print first 100 chars of each match
+
         if doc_matches:
             print(f"Found {len(doc_matches)} document matches. Generating answer from docs...")
             answer = chat_client.generate_answer_from_docs(
                 context_list=doc_matches,
                 message=message,
-                previous_messages=body.previous_messages
+                previous_messages=body.previous_messages,
+                course_code=course_code,
+                user_id=user_id # Pass user_id
             )
             if answer:
                 return jsonify({"answer": answer, "source": "documents"}), 200
         
-        # 2. Fallback to Video Search (Existing Logic)
+        # 2. Fallback to Video Search
         print("No sufficient document matches. Falling back to Video Indexer...")
         
-        if not target_video_ids and course_code:
+        if not target_video_ids:
+            # Fetch all videos for the course from URL
             target_video_ids = get_all_video_ids_for_course(course_code)
             
             if not target_video_ids:
-                # If both docs and videos fail
                 return jsonify({"answer": f"I couldn't find any relevant documents or processed videos for course {course_code}."}), 200
 
         answer = chat_client.generate_response(
             message=message, 
             previous_messages=body.previous_messages,
             video_ids=target_video_ids,
-            course_code=course_code
+            course_code=course_code, # Pass the URL param
+            user_id=user_id # Pass user_id
         )
         
         return jsonify({"answer": answer, "source": "video"}), 200
@@ -1126,6 +1132,25 @@ def chat_with_course(course_code):
         print(f"Chat error: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/chat/history/<course_code>", methods=["GET"])
+def get_chat_history(course_code):
+    """
+    Retrieves chat history for a specific course and user.
+    Usage: GET /api/chat/history/1010?user_id=C220118@e.ntu.edu.sg
+    """
+    try:
+        user_id = request.args.get("user_id")
+        if not user_id:
+            return jsonify({"error": "user_id is required"}), 400
+
+        # Fetch from chat_helper
+        history = chat_client.get_conversation_history(user_id, course_code)
+        
+        return jsonify({"history": history}), 200
+
+    except Exception as e:
+        print(f"History fetch error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(debug=True)

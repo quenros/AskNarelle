@@ -4,6 +4,7 @@ import re
 import logging
 import concurrent.futures
 from typing import List, Optional, Any
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Pydantic & Langchain Imports
@@ -31,10 +32,14 @@ class ChatHistory(BaseModel):
     assistant_response: str
 
 class ChatRequestBody(BaseModel):
-    previous_messages: list[ChatHistory] = []
+    # If state is managed backend, we might not need previous_messages from frontend anymore
+    # But keeping it optional is good for backward compatibility or hybrid approaches
+    previous_messages: list[ChatHistory] = [] 
     message: str
     video_ids: list[str] = []
     course_code: str = ""
+    # We still keep user_id to save the chat log
+    user_id: str = ""    
 
 class LLMIsTemporalResponse(BaseModel):
     is_temporal: bool
@@ -116,12 +121,9 @@ def seconds_to_timestamp(seconds):
 # --------------------------------------------------------------------------
 # 3. Prompts (Inlined for self-containment)
 # --------------------------------------------------------------------------
-
-def get_video_prompt_template():
+def get_prompt_template():
     return """
-    You are an AI assistant that answers questions based on detailed video context. The context includes:
-
-    - **Transcripts** with timestamps quoted by "(" and ")".
+    You are an AI assistant that answers questions based on detailed context. The context may include video transcripts or document excerpts.
     
     **Instructions:**
     
@@ -130,8 +132,8 @@ def get_video_prompt_template():
     
     2. **Use Relevant Context:**
        - Search through the provided context to find information that directly answers the question.
-       - Reference specific timestamps (in **mm:ss** format) when mentioning parts of the video.
-       - For every important information, I want you to quote the timestamp in this format ONLY: "Covered at [mm:ss]"
+       - If the context comes from a video (contains timestamps like [mm:ss]), you may reference the timestamp if relevant.
+       - If the context is from a document, simply cite the information source (e.g., "According to [Filename]...").
     
     3. **Compose a Clear and Concise Answer:**
        - Provide the information in a straightforward manner.
@@ -141,7 +143,7 @@ def get_video_prompt_template():
     
     4. **Formatting Guidelines:**
        - Begin your answer by addressing the user's question.
-       - State the video title in your answer. Be specific where you got the context from.
+       - State the source (Video Title or Document Name) in your answer. Be specific where you got the context from.
        
     **History:**
     
@@ -157,33 +159,28 @@ def get_video_prompt_template():
     
     **Your Answer:**
     """
-
 def get_document_prompt_template():
     return """
-    You are an AI assistant that answers questions based **ONLY** on the provided detailed context. The context may include video transcripts or document excerpts.
+    You are an AI assistant that answers questions based on detailed context from documents.
     
     **Instructions:**
     
     1. **Understand the User's Question:**
        - Carefully read the user's query to determine what information they are seeking.
     
-    2. **Strict Grounding:**
-       - Answer the question using **only** the information provided in the "Context" section below.
-       - Do **not** use your outside knowledge.
-       - If the answer is not explicitly present in the context, state: "I cannot find the answer in the provided course materials."
-    
-    3. **Use Relevant Context:**
+    2. **Use Relevant Context:**
        - Search through the provided context to find information that directly answers the question.
-       - If the context comes from a video (contains timestamps like [mm:ss]), you may reference the timestamp if relevant.
        - If the context is from a document, simply cite the information source (e.g., "According to [Filename]...").
     
-    4. **Compose a Clear and Concise Answer:**
+    3. **Compose a Clear and Concise Answer:**
        - Provide the information in a straightforward manner.
-       - Ensure the response is self-contained.
+       - Ensure the response is self-contained and understandable without needing additional information.
+       - If unsure of question, ask the user to clarify again in a polite manner.
+       - If unable to find answer in context, say that you are unable to find an answer in a polite manner.
     
-    5. **Formatting Guidelines:**
+    4. **Formatting Guidelines:**
        - Begin your answer by addressing the user's question.
-       - State the source (Video Title or Document Name) in your answer.
+       - State the Document Name in your answer. Be specific where you got the context from.
        
     **History:**
     
@@ -362,6 +359,9 @@ class ChatHelper:
         self.prompt_collection = self.db[self.vector_collection_name]
         self.video_collection = self.db[self.video_collection_name]
         self.course_collection = self.db[self.course_collection_name]
+        
+        # NOTE: Removed static chatlogs_db reference. 
+        # We will access databases dynamically by course_code.
 
         self.embeddings = AzureOpenAIEmbeddings(
             azure_endpoint=self.azure_endpoint,
@@ -416,6 +416,122 @@ class ChatHelper:
             logger.error(f"Ingest failed: {e}")
             return False
 
+    # --- New Helper: Generate Answer from Raw Context List ---
+    def generate_answer_from_docs(self, context_list: List[str], message: str, previous_messages: list = None, 
+                                  course_code: str = "", user_id: str = ""):
+            """
+            Generates an answer using provided text strings (from Documents) as context.
+            """
+            if not context_list:
+                return None 
+
+            # Convert simple strings to LangChain Documents for the chain
+            docs = [Document(page_content=txt) for txt in context_list]
+
+            # PRIORITIZE provided list, fallback to DB if empty
+            history_str = ""
+            if previous_messages and len(previous_messages) > 0:
+                history_str = "\n".join(
+                    [f"User: {msg.user_input}\nAssistant: {msg.assistant_response}" for msg in previous_messages]
+                )
+            elif user_id and course_code:
+                 history_str = self.get_conversation_history_str(user_id, course_code)
+
+
+            prompt = PromptTemplate(
+                template=get_document_prompt_template(),
+                input_variables=["context", "input", "history"]
+            )
+
+            chain = create_stuff_documents_chain(self.chat_model, prompt)
+            
+            try:
+                answer = chain.invoke({
+                    "context": docs,
+                    "input": message,
+                    "history": history_str
+                })
+                
+                # Still save the turn to DB for persistence/audit
+                if user_id and course_code:
+                     self.save_conversation_turn(course_code, message, answer, user_id)
+                     
+                return answer
+            except Exception as e:
+                logger.error(f"Doc Generation error: {e}")
+                return None
+
+    # --- Chat History Methods (UPDATED for Dynamic DB) ---
+    def get_conversation_history(self, user_id: str, course_code: str) -> list:
+        """
+        Retrieves the conversation document for a given user in a course.
+        Accesses database named by `course_code`.
+        """
+        if not user_id or not course_code: return []
+        
+        try:
+            # Dynamic DB access: client[course_code]['conversations']
+            course_db = self.mongo_client[course_code]
+            conversations_col = course_db['conversations']
+            
+            # Find document for this user in this course's DB
+            # Note: We filter by user_id. course_code is implicit in DB name, but keeping it in doc is fine.
+            doc = conversations_col.find_one({"user_id": user_id})
+            
+            if doc and "messages" in doc:
+                messages = doc["messages"]
+                # Serialize datetime objects to ISO strings for JSON compatibility
+                for msg in messages:
+                    if "timestamp" in msg and isinstance(msg["timestamp"], datetime):
+                        msg["timestamp"] = msg["timestamp"].isoformat()
+                return messages
+        except Exception as e:
+            logger.error(f"Error fetching history from {course_code} DB: {e}")
+            
+        return []
+
+    # Helper for string format (unused for generation now, but good to keep)
+    def get_conversation_history_str(self, user_id: str, course_code: str, limit: int = 6) -> str:
+        msgs = self.get_conversation_history(user_id, course_code)
+        # Take last N messages
+        recent_msgs = msgs[-limit:] if len(msgs) > limit else msgs
+        
+        history_str = ""
+        for m in recent_msgs:
+            role = "User" if m['role'] == 'user' else "Assistant"
+            history_str += f"{role}: {m['content']}\n"
+        return history_str
+
+    def save_conversation_turn(self, course_code: str, user_msg: str, assistant_msg: str, user_id: str):
+        """
+        Saves the user query and assistant response to the database named `course_code`.
+        """
+        if not user_id or not course_code: return
+        
+        new_messages = [
+            {"role": "user", "content": user_msg, "timestamp": datetime.utcnow()},
+            {"role": "assistant", "content": assistant_msg, "timestamp": datetime.utcnow()}
+        ]
+        
+        try:
+            # Dynamic DB access
+            course_db = self.mongo_client[course_code]
+            conversations_col = course_db['conversations']
+
+            # Upsert: Create doc if not exists (keyed by user_id), otherwise push messages
+            conversations_col.update_one(
+                {"user_id": user_id}, 
+                {
+                    "$set": {"last_updated": datetime.utcnow(), "course_code": course_code},
+                    "$push": {"messages": {"$each": new_messages}}
+                },
+                upsert=True
+            )
+            logger.info(f"Saved conversation turn for user {user_id} in DB {course_code}")
+        except Exception as e:
+            logger.error(f"Error saving conversation turn to {course_code} DB: {e}")
+
+
     # --- Helper: DB Mappings ---
     def check_if_course_exist(self, course_code: str) -> dict:
         return self.course_collection.find_one({"course_code": course_code})
@@ -467,10 +583,10 @@ class ChatHelper:
         
         logger.info(f"Executing Semantic Search for '{query}' on IDs: {valid_ids}")
 
-        # Diagnostic check for each ID
+        # DEBUG: Check if data actually exists for these IDs
         for vid in valid_ids:
             count = self.prompt_collection.count_documents({"metadata.video_id": vid})
-            logger.info(f"Video ID '{vid}' has {count} vector documents in DB.")
+            logger.info(f"Diagnostic: Video ID '{vid}' has {count} vector documents in DB.")
 
         # Standard Search by video_id
         filter_query = {"metadata.video_id": {"$in": valid_ids}}
@@ -697,7 +813,7 @@ class ChatHelper:
     # --- Main Generation Entry Point ---
 
     def generate_response(self, video_id: str = None, message: str = "", previous_messages: list = None, 
-                          video_ids: list = None, course_code: str = ""):
+                          video_ids: list = None, course_code: str = "", user_id: str = ""):
         
         target_video_ids = []
         if video_ids:
@@ -743,56 +859,37 @@ class ChatHelper:
             logger.warning("No context documents found.")
             return "I couldn't find any relevant information."
 
-        formatted_history = "\n".join(
-            [f"User: {msg.user_input}\nAssistant: {msg.assistant_response}" for msg in (previous_messages or [])]
-        )
+        # PRIORITIZE provided list, fallback to DB if empty
+        history_str = ""
+        if previous_messages and len(previous_messages) > 0:
+            history_str = "\n".join(
+                [f"User: {msg.user_input}\nAssistant: {msg.assistant_response}" for msg in previous_messages]
+            )
+        elif user_id and course_code:
+             history_str = self.get_conversation_history_str(user_id, course_code)
+
 
         prompt = PromptTemplate(
-            template=get_video_prompt_template(),
+            template=get_prompt_template(),
             input_variables=["context", "input", "history"]
         )
 
         chain = create_stuff_documents_chain(self.chat_model, prompt)
         
         try:
-            return chain.invoke({
+            answer = chain.invoke({
                 "context": context_docs,
                 "input": message,
-                "history": formatted_history
+                "history": history_str
             })
+            
+            # Save new turn to DB if session exists
+            if user_id and course_code:
+                 self.save_conversation_turn(course_code, message, answer, user_id)
+
+            return answer
         except Exception as e:
             logger.error(f"Generation error: {e}")
             return "Error generating response."
-
-    def generate_answer_from_docs(self, context_list: List[str], message: str, previous_messages: list = None):
-            """
-            Generates an answer using provided text strings (from Documents) as context.
-            """
-            if not context_list:
-                return None 
-
-            # Convert simple strings to LangChain Documents for the chain
-            docs = [Document(page_content=txt) for txt in context_list]
-
-            formatted_history = "\n".join(
-                [f"User: {msg.user_input}\nAssistant: {msg.assistant_response}" for msg in (previous_messages or [])]
-            )
-
-            prompt = PromptTemplate(
-                template=get_document_prompt_template(),
-                input_variables=["context", "input", "history"]
-            )
-
-            chain = create_stuff_documents_chain(self.chat_model, prompt)
-            
-            try:
-                return chain.invoke({
-                    "context": docs,
-                    "input": message,
-                    "history": formatted_history
-                })
-            except Exception as e:
-                logger.error(f"Doc Generation error: {e}")
-                return None
 
 chat_client = ChatHelper()
