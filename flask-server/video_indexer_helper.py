@@ -213,6 +213,43 @@ def get_video_document_by_id(video_mongo_id: str):
     except:
         return None
 
+def delete_all_video_entries_for_course(course_code: str):
+    """
+    Deletes all videos and their related data (transcript, vectors, etc.) associated with a course code.
+    Finally, deletes the course entry itself from vi_courses.
+    """
+    try:
+        logger.info(f"Starting full VI deletion for course: {course_code}")
+        
+        # 1. Find Course
+        course_doc = vi_courses.find_one({"course_code": course_code})
+        if not course_doc:
+            logger.warning(f"Course {course_code} not found in VI DB.")
+            return False
+
+        # 2. Get list of video ObjectIds
+        video_ids = course_doc.get("videos", [])
+        
+        # 3. Iterate and Delete each video and its related data
+        count = 0
+        for vid_oid in video_ids:
+            # We convert ObjectId to string because delete_video_entry_from_db expects string
+            success = delete_video_entry_from_db(str(vid_oid))
+            if success:
+                count += 1
+                
+        logger.info(f"Deleted {count} videos associated with course {course_code}")
+
+        # 4. Delete the Course Document from vi_courses
+        vi_courses.delete_one({"course_code": course_code})
+        logger.info(f"Deleted VI course document for {course_code}")
+        
+        return True
+
+    except Exception as e:
+        logger.error(f"Error deleting all videos for course {course_code}: {e}")
+        return False
+
 def delete_video_entry_from_db(video_mongo_id: str):
     """
     Removes video from Video collection and Course reference.

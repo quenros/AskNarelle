@@ -406,7 +406,7 @@ def createIndexFunction(collection_name):
             name="content_vector", #content_vector
             type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
             searchable=True, 
-            # vector_search_dimensions= embedding_dimenison, 
+            vector_search_dimensions=1536, 
             vector_search_profile_name="my-vector-config"),
 
         SearchableField(

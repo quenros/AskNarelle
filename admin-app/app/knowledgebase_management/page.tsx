@@ -41,7 +41,10 @@ function ManageKnowledgeBase(): JSX.Element {
   const username = accounts[0]?.username;
 
   const handleCollectionCreated = () => setCollectionCreated(!collectionCreated);
-  const handleCollectionDeleted = () => setCollectionDeleted(!collectionDeleted);
+  const handleCollectionDeleted = () => {
+    setCollectionDeleted((prev) => !prev);
+    setShowDeletionPopup(false);
+  };
   const handleCourseShared = () => setCourseShared(!courseShared);
 
   const handleButtonClick = () => setShowPopup(true);

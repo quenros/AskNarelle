@@ -59,6 +59,7 @@ from video_indexer_helper import (
     delete_video_entry_from_db,
     get_course_videos_manage,
     get_all_video_ids_for_course,
+    delete_all_video_entries_for_course,
     VideoIndexerClient,
     VideoDetails,
 )
@@ -498,9 +499,12 @@ def delete_course():
             delete_success_container = delete_blob_storage_container(collection_name)
             if delete_success_container:
                 delete_all_course_docs = delete_all_course_documents(collection_name)
+                vi_delete_success = delete_all_video_entries_for_course(collection_name)
+                if not vi_delete_success:
+                    print(f"Warning: Failed to fully delete VI data for {collection_name}")
                 if delete_all_course_docs:
                     return (
-                        jsonify({"message": "Container deleted successfully!"}),
+                        jsonify({"message": "Container and VI data deleted successfully!"}),
                         201,
                     )
                 else:
