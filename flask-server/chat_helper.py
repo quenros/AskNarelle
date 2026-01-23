@@ -461,7 +461,7 @@ class ChatHelper:
                 logger.error(f"Doc Generation error: {e}")
                 return None
 
-    # --- Chat History Methods (UPDATED for Dynamic DB) ---
+    # --- Chat History Methods ---
     def get_conversation_history(self, user_id: str, course_code: str) -> list:
         """
         Retrieves the conversation document for a given user in a course.
@@ -522,7 +522,7 @@ class ChatHelper:
             conversations_col.update_one(
                 {"user_id": user_id}, 
                 {
-                    "$set": {"last_updated": datetime.utcnow(), "course_code": course_code},
+                    "$set": {"last_updated": datetime.utcnow(), "course_name": course_code},
                     "$push": {"messages": {"$each": new_messages}}
                 },
                 upsert=True

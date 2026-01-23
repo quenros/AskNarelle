@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@ant-design/plots": "^2.6.8",
     "@azure/msal-browser": "^3.19.1",
     "@azure/msal-react": "^2.0.21",
     "@azure/storage-blob": "^12.17.0",

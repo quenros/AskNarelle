@@ -197,7 +197,7 @@ export default function Home() {
                 </Col>
               </Row>
 
-              <Row gutter={[16, 16]} style={{ marginTop: 16, marginBottom: 16 }}>
+              {/* <Row gutter={[16, 16]} style={{ marginTop: 16, marginBottom: 16 }}>
                 <Col xs={24} md={12}>
                   <Card title="Active Users">
                     <ChartThree />
@@ -208,7 +208,7 @@ export default function Home() {
                     <ChartFour />
                   </Card>
                 </Col>
-              </Row>
+              </Row> */}
             </>
           )}
         </div>
@@ -228,7 +228,7 @@ export default function Home() {
           }}
         >
           <div style={{ display: "none" }} className="sm:block" />
-          <Row gutter={[24, 24]} align="middle" style={{ width: "100%" }}>
+          <Row gutter={[24, 24]} style={{ width: "100%" }}>
             <Col xs={24} md={14}>
               <div style={{ position: "relative", width: "100%", height: "60vh" }}>
                 <Image

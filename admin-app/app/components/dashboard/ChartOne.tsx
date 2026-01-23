@@ -1,192 +1,121 @@
 "use client";
-import { ApexOptions } from 'apexcharts';
-import dynamic from 'next/dynamic';
+
 import React, { useEffect, useState } from 'react';
-// import ReactApexChart from 'react-apexcharts';
-const ReactApexChart = dynamic(() => import('react-apexcharts'), { ssr: false });
+import { Column } from '@ant-design/plots'; 
+import { Card, Spin, Typography } from 'antd';
 import { msalConfig } from '../../../authConfig'
 import { PublicClientApplication } from '@azure/msal-browser';
 
+const { Title, Text } = Typography;
 const msalInstance = new PublicClientApplication(msalConfig);
 
-
-interface ChartOneState {
-  // series: {
-  //   name: string;
-  //   data: number[];
-  // }[];
-  series: {
-    name: string,
-    data: number[]
-  }[];
-}
-
 const ChartOne: React.FC = () => {
-
   const accounts = msalInstance.getAllAccounts();
   const username = accounts[0]?.username; 
 
-  const [state, setState] = useState<ChartOneState>({
-    series: [
-    {
-      name: "Number of queries by month",
-      data: []
-    },
-  ],
-});
-const[categories, setCategories] = useState<string[]>([])
+  const [data, setData] = useState<Array<{ month: string, value: number }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [totalQueries, setTotalQueries] = useState(0);
 
   useEffect(() => {
+    if (!username) return;
+
     fetch(`http://localhost:5000/chats/queriesByMonth/${username}`)
     .then(response => {
-      if (!response.ok) {
-        throw new Error('Failed to fetch total users');
-      }
+      if (!response.ok) throw new Error('Failed to fetch data');
       return response.json();
     })
-    .then((data: { months: string[]; counts: number[] }) => {
-      const newState: ChartOneState = {
-        series: [
-          {
-            name: "Number of queries by month",
-            data : data.counts
-          }
-        ]
-      };
-      setCategories(data.months)
-      setState(newState);
+    .then(apiData => {
+        const counts = Array.isArray(apiData.counts) ? apiData.counts : [];
+        const months = Array.isArray(apiData.months) ? apiData.months : [];
+        
+        const dataMap: Record<string, number> = {};
+        months.forEach((m: string, i: number) => {
+            dataMap[m] = counts[i] || 0;
+        });
+
+        // Identify unique years from the data
+        const years = new Set<number>();
+        months.forEach((m: string) => {
+            const parts = m.split(' '); // ["January", "2026"]
+            if (parts.length > 1) {
+                years.add(parseInt(parts[1]));
+            }
+        });
+
+        // Default to current year if no data
+        if (years.size === 0) {
+            years.add(new Date().getFullYear());
+        }
+
+        const sortedYears = Array.from(years).sort();
+        const allMonthsLabels: string[] = [];
+
+        // Generate all "Month Year" combinations for the identified years
+        const monthNames = [
+            "January", "February", "March", "April", "May", "June", 
+            "July", "August", "September", "October", "November", "December"
+        ];
+
+        sortedYears.forEach(year => {
+            monthNames.forEach(month => {
+                allMonthsLabels.push(`${month} ${year}`);
+            });
+        });
+
+        const chartData = allMonthsLabels.map(label => ({
+            month: label,
+            value: dataMap[label] || 0
+        }));
+
+        setData(chartData);
+        setTotalQueries(counts.reduce((a: number, b: number) => a + b, 0));
     })
-    .catch(error => {
-      console.error('Error fetching total users:', error);
-    });
-   }, [username])
+    .catch(error => console.error("Error:", error))
+    .finally(() => setLoading(false));
+  }, [username]);
 
-  const options: ApexOptions = {
-    legend: {
-      show: false,
-      position: 'top',
-      horizontalAlign: 'left',
-    },
-    colors: ['#3C50E0', '#80CAEE'],
-    chart: {
-      fontFamily: 'Satoshi, sans-serif',
-      height: 335,
-      type: 'area',
-      dropShadow: {
-        enabled: true,
-        color: '#623CEA14',
-        top: 10,
-        blur: 4,
-        left: 0,
-        opacity: 0.1,
-      },
-  
-      toolbar: {
-        show: false,
+  const config = {
+    data,
+    xField: 'month',
+    yField: 'value',
+    color: '#1890ff',
+    label: false, 
+    xAxis: {
+      label: {
+        autoHide: false, 
+        autoRotate: true,
       },
     },
-    responsive: [
-      {
-        breakpoint: 1024,
-        options: {
-          chart: {
-            height: 300,
-          },
-        },
-      },
-      {
-        breakpoint: 1366,
-        options: {
-          chart: {
-            height: 350,
-          },
-        },
-      },
-    ],
-    stroke: {
-      width: [2, 2],
-      curve: 'straight',
+    tooltip: {
+        showMarkers: false
     },
-    // labels: {
-    //   show: false,
-    //   position: "top",
-    // },
-    grid: {
-      xaxis: {
-        lines: {
-          show: true,
-        },
-      },
-      yaxis: {
-        lines: {
-          show: true,
-        },
-      },
-    },
-    dataLabels: {
-      enabled: false,
-    },
-    markers: {
-      size: 4,
-      colors: '#fff',
-      strokeColors: ['#3056D3', '#80CAEE'],
-      strokeWidth: 3,
-      strokeOpacity: 0.9,
-      strokeDashArray: 0,
-      fillOpacity: 1,
-      discrete: [],
-      hover: {
-        size: undefined,
-        sizeOffset: 5,
-      },
-    },
-    xaxis: {
-      type: 'category',
-      categories: categories,
-      axisBorder: {
-        show: false,
-      },
-      axisTicks: {
-        show: false,
-      },
-    },
-    yaxis: {
-      title: {
-        style: {
-          fontSize: '0px',
-        },
-      },
-      min: 0,
-      max: 10,
-    },
+    height: 350,
+    autoFit: true, 
   };
-
-  const handleReset = () => {
-    setState((prevState) => ({
-      ...prevState,
-    }));
-  };
-  handleReset;
 
   return (
-    <div className="col-span-12 rounded-sm border border-stroke bg-white px-5 pt-7.5 pb-5 shadow-md w-full sm:px-7.5 xl:col-span-8">
-      <div className="flex flex-wrap items-start justify-between gap-3 sm:flex-nowrap">
-        <div className="flex w-full flex-wrap gap-3 sm:gap-5 justify-center">
-          <p className="font-semibold text-[#2C3463] mt-5 font-nunito">Number of queries by month</p> 
-        </div>
+    <Card 
+      bordered={false} 
+      className="shadow-md" 
+      style={{ borderRadius: 8, height: '100%' }}
+    >
+      <div style={{ marginBottom: 20 }}>
+        <Text type="secondary">Total Queries</Text>
+        <Title level={3} style={{ margin: 0, color: '#1890ff' }}>
+          {totalQueries} queries
+        </Title>
       </div>
 
-      <div>
-        <div id="chartOne" className="-ml-5">
-          <ReactApexChart
-            options={options}
-            series={state.series}
-            type="area"
-            height={350}
-          />
-        </div>
-      </div>
-    </div>
+      {loading ? (
+         <div style={{ height: 350, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <Spin tip="Loading Chart..." />
+         </div>
+      ) : (
+        // @ts-ignore
+         <Column {...config} />
+      )}
+    </Card>
   );
 };
 

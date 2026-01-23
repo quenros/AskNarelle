@@ -10,7 +10,6 @@ from mongo_helper import (
     delete_document,
     get_documents,
     update_movement_document,
-    get_chatlogs,
     upload_course,
     list_courses,
     upload_domain,
@@ -697,13 +696,6 @@ def update_movement():
         print(f"Error processing files upload: {error}")
         return jsonify({"error": "Internal server error"}), 500
 
-
-@app.route("/get-chats", methods=["GET"])
-def get_chats():
-    chats = get_chatlogs()
-    return jsonify(chats), 201
-
-
 @app.route("/manageaccess/<course_name>", methods=["GET"])
 def getCourseUsers(course_name):
     usersList = get_course_users(course_name)
@@ -1093,7 +1085,7 @@ def chat_with_course(course_code):
         # 1. Search Documents (Azure AI Search)
         print(f"Searching documents for course: {course_code}...")
         # Use a reasonable threshold (0.65 - 0.7) for ADA-002 models
-        doc_matches = search_documents(course_code, message, top_k=3, score_threshold=0.65)
+        doc_matches = search_documents(course_code, message, top_k=3, score_threshold=1.5)
         
         # Log the matches found
         print(f"Document matches found: {len(doc_matches)}")

@@ -1,7 +1,6 @@
 "use client";
 import { ApexOptions } from 'apexcharts';
 import React, { useState, useEffect } from 'react';
-// import ReactApexChart from 'react-apexcharts';
 import dynamic from 'next/dynamic';
 const ReactApexChart = dynamic(() => import('react-apexcharts'), { ssr: false });
 
@@ -14,36 +13,43 @@ interface ChartThreeState {
   series: number[];
 }
 
-
 const ChartThree: React.FC = () => {
   const accounts = msalInstance.getAllAccounts();
   const username = accounts[0]?.username; 
+  
   const [state, setState] = useState<ChartThreeState>({
     series: [],
   });
-
-  const[categories,setCategories] = useState<string[]>([])
+  const [categories, setCategories] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!username) return;
+
     fetch(`http://localhost:5000/chats/userSentiments/${username}`)
     .then(response => {
       if (!response.ok) {
-        throw new Error('Failed to fetch total users');
+        throw new Error('Failed to fetch sentiments');
       }
       return response.json();
     })
     .then((data: { sentiments: string[]; counts: number[] }) => {
+      const safeCounts = Array.isArray(data.counts) ? data.counts : [];
+      const safeSentiments = Array.isArray(data.sentiments) ? data.sentiments : [];
+      
       const newState: ChartThreeState = {
-        series: data.counts
+        series: safeCounts
       };
-      setCategories(data.sentiments)
+      setCategories(safeSentiments);
       setState(newState);
     })
     .catch(error => {
-      console.error('Error fetching total users:', error);
+      console.error("Error fetching chart data:", error);
+    })
+    .finally(() => {
+        setLoading(false);
     });
-   }, [username])
-
+  }, [username]);
 
   const options: ApexOptions = {
     chart: {
@@ -51,12 +57,11 @@ const ChartThree: React.FC = () => {
       type: 'donut',
     },
     colors: ['#3C50E0', '#6577F3', '#8FD0EF', '#0FADCF'],
-    labels: categories,
+    labels: categories, // Using categories for labels in Donut chart
     legend: {
       show: false,
       position: 'bottom',
     },
-  
     plotOptions: {
       pie: {
         donut: {
@@ -88,22 +93,36 @@ const ChartThree: React.FC = () => {
     ],
   };
 
-  const handleReset = () => {
-    setState((prevState) => ({
-      ...prevState,
-      series: [65, 34, 12, 56],
-    }));
-  };
-  handleReset;
+  if (loading) {
+    return <div className="sm:px-7.5 col-span-12 rounded-sm border border-stroke bg-white px-5 pb-5 pt-7.5 shadow-default xl:col-span-5 h-[350px] flex items-center justify-center">Loading...</div>;
+  }
+  
+  // Handling empty data case for Donut/Pie charts is crucial
+  if (state.series.length === 0 || state.series.every(val => val === 0)) {
+       return (
+        <div className="sm:px-7.5 col-span-12 rounded-sm border border-stroke bg-white px-5 pb-5 pt-7.5 shadow-default xl:col-span-5">
+            <div className="mb-3 justify-between gap-4 sm:flex">
+                <h5 className="text-xl font-semibold text-[#2C3463] mt-5 font-nunito">
+                    Sentiment Analysis
+                </h5>
+            </div>
+            <div className="h-[250px] flex items-center justify-center text-gray-500">
+                No sentiment data available.
+            </div>
+        </div>
+       );
+  }
 
   return (
-    <div className="col-span-12 rounded-sm border border-stroke bg-white px-5 pt-7.5 pb-5 shadow-md w-full sm:px-7.5 xl:col-span-8">
-        <div className='flex justify-center'>
-          <h5 className="font-semibold text-[#2C3463] mt-5 font-nunito">
+    <div className="sm:px-7.5 col-span-12 rounded-sm border border-stroke bg-white px-5 pb-5 pt-7.5 shadow-default xl:col-span-5">
+      <div className="mb-3 justify-between gap-4 sm:flex">
+        <div>
+          <h5 className="text-xl font-semibold text-[#2C3463] mt-5 font-nunito">
             Sentiment Analysis
           </h5>
         </div>
-  
+      </div>
+
       <div className="mb-2">
         <div id="chartThree" className="mx-auto flex justify-center">
           <ReactApexChart
@@ -114,30 +133,16 @@ const ChartThree: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex items-center justify-between flex-wrap">
-        <div className="sm:w-1/4 w-full px-8">
-          <div className="flex w-full items-center">
-            <span className="mr-2 block h-3 w-full max-w-3 rounded-full bg-[#3C50E0]"></span>
-            <p className="text-sm font-medium text-black">
-               Positive 
-            </p>
-          </div>
-        </div>
-        <div className="sm:w-1/4 w-full px-8">
-          <div className="flex w-full items-center">
-            <span className="mr-2 block h-3 w-full max-w-3 rounded-full bg-[#6577F3]"></span>
-            <p className="text-sm font-medium text-black">
-              Negative 
-            </p>
-          </div>
-        </div>
-        <div className="sm:w-1/4 w-full px-8">
-          <div className="flex w-full items-center">
-            <span className="mr-2 block h-3 w-full max-w-3 rounded-full bg-[#0FADCF]"></span>
-            <p className=" text-sm font-medium text-black">
-               Neutral
-            </p>
-          </div>
+      <div className="flex items-center justify-between flex-wrap gap-y-3">
+        {/* Dynamic Legend based on data availability would be better, but keeping static structure for now */}
+        {/* Only showing labels that might exist in typical sentiment analysis */}
+        <div className="w-full px-8 flex flex-wrap gap-4 justify-center">
+             {categories.map((cat, idx) => (
+                 <div key={idx} className="flex items-center">
+                    <span className="mr-2 block h-3 w-3 rounded-full" style={{backgroundColor: options.colors?.[idx % (options.colors?.length || 1)]}}></span>
+                    <p className="text-sm font-medium text-black">{cat}</p>
+                 </div>
+             ))}
         </div>
       </div>
     </div>

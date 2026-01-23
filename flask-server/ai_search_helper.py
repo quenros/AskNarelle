@@ -481,15 +481,15 @@ def search_documents(collection_name, query, top_k=3, score_threshold=5):
         )
         
         matches = []
-        print(f"DEBUG: Keyword search index '{collection_name}' for '{query}'")
+        print(f"Keyword search index '{collection_name}' for '{query}'")
         for result in results:
             score = result.get('@search.score', 0)
-            print(f"DEBUG: Found doc '{result['filename']}' with score: {score}")
+            print(f"Found doc '{result['filename']}' with score: {score}")
             
             if score >= score_threshold:
                 matches.append(f"[Document Source: {result['filename']}]\nContent: {result['content']}")
             else:
-                print(f"DEBUG: Keyword Doc '{result['filename']}' skipped due to low score ({score} < {score_threshold}).")
+                print(f"Keyword Doc '{result['filename']}' skipped due to low score ({score} < {score_threshold}).")
                 
         return matches
 

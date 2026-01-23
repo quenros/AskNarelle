@@ -5,10 +5,7 @@ from bson import ObjectId
 from datetime import datetime, timedelta
 import calendar
 
-from enum import Enum
-from typing import Dict, List, Any
-from bson import ObjectId
-from model import CourseDetails, VideoDetails
+
 
 load_dotenv()
 
@@ -17,14 +14,12 @@ load_dotenv()
 # cosmos_port = os.environ.get('COSMOS_PORT')
 
 mongo_uri = os.environ.get('MONGO_URI')
-print(mongo_uri)
-# chat_mongo_uri = os.environ.get('COSMOS_MONGO_STRING')
+chat_mongo_uri = os.environ.get('CHAT_MONGO_URI')
 
 client = MongoClient(mongo_uri)
-# chat_client = MongoClient(chat_mongo_uri)
+chat_client = MongoClient(chat_mongo_uri)
 
 db = client['file_database']
-chatlogs_db = client['chathistory-storage']
 
 def upload_course(course_name, username):
     username = username.lower()
@@ -118,33 +113,26 @@ def upload_domain(domain_name, course_name):
 def create_document(files):
     try:
         for file in files:
-            base_filter = {
-                "course_name": file["course_name"],
-                "domain": file["domain"],
-                "name": file["name"],
-            }
-
+            
             db["uploaded_files"].update_many(
-                {**base_filter, "in_vector_store": "yes"},
+                {"name": file['name'], "in_vector_store": "yes"},
                 {"$set": {"in_vector_store": "no"}}
             )
 
             db["uploaded_files"].update_many(
-                {**base_filter, "is_root_blob": "yes"},
+                {"name": file['name'], "is_root_blob": "yes"},
                 {"$set": {"is_root_blob": "no"}}
             )
 
             db["uploaded_files"].update_one(
-                {"version_id": file["version_id"]},
-                {"$set": file},
-                upsert=True
+                {"version_id": file['version_id']},
+                {"$set": file},           
+                upsert=True             
             )
-
         return True
     except Exception as e:
         print(f"An error occurred: {e}")
         return False
-
     
 def add_activity(activities):
     try:
@@ -313,18 +301,6 @@ def delete_course_user(courseName, user):
         print(e)
         return False
 
-def get_chatlogs():
-    try:
-        chats_logs = list(chatlogs_db["chat-collections"].find())
-
-        for chat in chats_logs:
-            chat['_id'] = str(chat['_id'])
-
-        return chats_logs
-    except Exception as e:
-        print(e)
-        return False
-
 def get_course_files_count(course_name):
     count = 0
     try:
@@ -354,7 +330,7 @@ def get_users_count(username):
         user_courses_docs = list(db["courses"].find({"user": username }))
         for doc in user_courses_docs: 
             course_db = client[doc["course_name"]]  
-            unique_users = course_db["conversations"].distinct("user")
+            unique_users = course_db["conversations"].distinct("user_id")
             users = users + len(unique_users)
         
         return users
@@ -405,8 +381,8 @@ def get_queries_by_month(username):
             {
                 "$group": {
                     "_id": {
-                        "year": { "$year": { "$toDate": { "$multiply": ["$messages.recorded_on.timestamp", 1000] } } },
-                        "month": { "$month": { "$toDate": { "$multiply": ["$messages.recorded_on.timestamp", 1000] } } }
+                        "month": {"$month": {"$toDate": "$messages.timestamp"}}, 
+                        "year": {"$year": {"$toDate": "$messages.timestamp"}}
                     },
                     "count": { "$sum": 1 }
                 }
@@ -419,6 +395,7 @@ def get_queries_by_month(username):
         for course in courses_to_include:
             course_db = client[course]
             course_result = list(course_db["conversations"].aggregate(pipeline))
+            print(course_result)
    
             for entry in course_result:
                 year = entry["_id"]["year"]
@@ -613,16 +590,3 @@ def check_if_rec_exists(username, course_name):
          return True
      else:
          return False
-    
-    
-
-
-
-     
- 
-
-
-
-
-   
-    

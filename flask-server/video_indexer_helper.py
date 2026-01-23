@@ -70,6 +70,7 @@ vi_raw = vi_db.get_collection("video_indexer_raw")
 vi_transcript_full = vi_db['transcript_full']
 vi_prompt_raw = vi_db['prompt_content_raw']
 vi_prompt_clean = vi_db['prompt_content_clean']
+vi_prompt_index = vi_db['prompt_content_index']
 
 class Status(str, Enum):
     IN_PROGRESS = "IN_PROGRESS"
@@ -221,16 +222,16 @@ def delete_all_video_entries_for_course(course_code: str):
     try:
         logger.info(f"Starting full VI deletion for course: {course_code}")
         
-        # 1. Find Course
+        # Find Course
         course_doc = vi_courses.find_one({"course_code": course_code})
         if not course_doc:
             logger.warning(f"Course {course_code} not found in VI DB.")
             return False
 
-        # 2. Get list of video ObjectIds
+        # Get list of video ObjectIds
         video_ids = course_doc.get("videos", [])
         
-        # 3. Iterate and Delete each video and its related data
+        # Iterate and Delete each video and its related data
         count = 0
         for vid_oid in video_ids:
             # We convert ObjectId to string because delete_video_entry_from_db expects string
@@ -240,7 +241,7 @@ def delete_all_video_entries_for_course(course_code: str):
                 
         logger.info(f"Deleted {count} videos associated with course {course_code}")
 
-        # 4. Delete the Course Document from vi_courses
+        # Delete the Course Document from vi_courses
         vi_courses.delete_one({"course_code": course_code})
         logger.info(f"Deleted VI course document for {course_code}")
         
@@ -293,12 +294,10 @@ def delete_video_entry_from_db(video_mongo_id: str):
             logger.info(f"Deleted {res_prompt_raw.deleted_count} docs from prompt_content_raw")
 
             # prompt_content_clean: Linked by metadata.video_id
-            # Note: This is the vector store.
             res_prompt_clean = vi_prompt_clean.delete_many({"metadata.video_id": azure_video_id})
             logger.info(f"Deleted {res_prompt_clean.deleted_count} docs from prompt_content_clean")
             
-            # If you have a 'prompt_content_index' collection, add it here:
-            # vi_prompt_index.delete_many({"video_id": azure_video_id}) 
+            vi_prompt_index.delete_many({"video_id": azure_video_id}) 
 
         # Delete the Video Document itself
         vi_videos.delete_one({"_id": vid_oid})
@@ -540,7 +539,7 @@ class VideoIndexerClient:
         resp.raise_for_status()
 
 # --------------------------------------------------------------------------
-# 5. Background Thread Worker (UPDATED ORCHESTRATOR)
+# 5. Background Thread Worker
 # --------------------------------------------------------------------------
 def index_video_and_update_metadata(
     course_doc: Dict[str, Any],
@@ -583,10 +582,9 @@ def index_video_and_update_metadata(
             except Exception as e:
                 logger.warning(f"Thumbnail fetch failed: {e}")
 
-        # 5. Get Prompt Content (Structured Insights)
+        # 5. Get Prompt Content 
         prompt_content = None
         try:
-            # Uses the new robust method with poll logic
             prompt_content = client.get_prompt_content(vi_video_id, timeout_sec=120)
             if prompt_content:
                 # Save raw prompt content to DB
@@ -601,7 +599,7 @@ def index_video_and_update_metadata(
         # 6. Transcript Processing Pipeline
         logger.info(f"Starting Transcript Pipeline for {vi_video_id}...")
         
-        # Verify if insights actually has transcript
+        # verify if insights actually has transcript
         has_transcript = False
         if insights.get("videos"):
             for v in insights["videos"]:
@@ -615,27 +613,20 @@ def index_video_and_update_metadata(
             # Use the Transcript Helper
             transcript_client.map_insights_to_transcript(insights, video_object_id)
             
-            # B. Clean Transcript (LLM)
+            # Clean Transcript (LLM)
             logger.info("Triggering transcript cleaning...")
             transcript_client.trigger_transcript_cleaning(video_object_id, course_doc, video_description)
             
-            # C. Merge Clean Transcript -> Prompt Content & Ingest to Vector Store
+            # Merge Clean Transcript, Prompt Content & Ingest to Vector Store
             if prompt_content:
                 logger.info(f"Merging clean transcript into Prompt Content and Ingesting for {vi_video_id}...")
                 transcript_client.update_prompt_with_clean_transcript(video_object_id, vi_video_id)
             else:
-                logger.warning("Skipping vector ingestion due to missing prompt content. Chat will likely fail for this video.")
+                logger.warning("Skipping vector ingestion due to missing prompt content.")
 
         # 7. Mark Completed
         change_video_status(video_object_id, Status.COMPLETED)
         logger.info(f"Successfully processed {video_object_id}")
-
-        # 8. Send Email
-        if user_email:
-            course_code = course_doc.get("course_code", "Unknown Course")
-            send_success_email(user_email, video_name, course_code)
-
-        return vi_video_id
 
     except Exception as e:
         logger.exception(f"Error processing video {video_object_id}")

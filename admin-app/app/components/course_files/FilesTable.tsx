@@ -20,6 +20,7 @@ import {
   DownloadOutlined,
   EyeOutlined,
   LoadingOutlined,
+  MessageOutlined, // Import Message Icon
 } from "@ant-design/icons";
 import dayjs, { Dayjs } from "dayjs";
 
@@ -115,15 +116,12 @@ const FilesTable: React.FC<FileTableProps> = ({
       render: (_, record) => {
         const isProcessing = record.status === "IN_PROGRESS";
         
-        // --- UPDATE STARTS HERE ---
-        // We define the params object with proper types
         const queryParams: Record<string, string> = {
             name: record.name,
             url: `http://localhost:5000/api/preview/${collectionName}/${domainName}?name=${record.name}`,
         };
 
         if (record.vi_mongo_id) {
-          console.log(record)
             queryParams.id = record.vi_mongo_id;
         }
 
@@ -154,6 +152,22 @@ const FilesTable: React.FC<FileTableProps> = ({
                     <EyeOutlined /> {record.name}
                   </a>
                 </Tooltip>
+
+                {/* Direct Chat Button for Video */}
+                {isVideo(record.name) && (
+                    <Tooltip title="Chat with this video">
+                        <Button 
+                            type="text" 
+                            icon={<MessageOutlined style={{ color: '#1890ff' }} />}
+                            onClick={() => {
+                                const videoIdentifier = record.vi_mongo_id || record.name;
+                                router.push(
+                                    `/knowledgebase_management/${encodeURIComponent(collectionName)}/${encodeURIComponent(domainName)}/preview/chat?id=${encodeURIComponent(videoIdentifier)}&name=${encodeURIComponent(record.name)}`
+                                );
+                            }}
+                        />
+                    </Tooltip>
+                )}
 
                 <Tooltip title="Open/download">
                   <a
@@ -195,14 +209,6 @@ const FilesTable: React.FC<FileTableProps> = ({
           <Tag>Stored only</Tag>
         );
       },
-    },
-    {
-      title: "Root File",
-      dataIndex: "is_root_blob",
-      key: "root",
-      width: 100,
-      render: (v: string) =>
-        v === "yes" ? <Tag color="blue">Root</Tag> : <Tag>Derived</Tag>,
     },
     {
       title: "Date",
@@ -258,7 +264,7 @@ const FilesTable: React.FC<FileTableProps> = ({
                     d.name,
                     d.version_id,
                     d.is_root_blob,
-                    d.vi_mongo_id 
+                    d.vi_mongo_id // PASS THE ID HERE
                   )
                 }
               >
