@@ -259,6 +259,7 @@ def delete_video_entry_from_db(video_mongo_id: str):
     - video_indexer_raw (by video_indexer_id)
     - prompt_content_raw (by video_id)
     - prompt_content_clean (by metadata.video_id)
+    - prompt_content_index (by video_id)
     """
     try:
         vid_oid = ObjectId(video_mongo_id)
@@ -297,7 +298,9 @@ def delete_video_entry_from_db(video_mongo_id: str):
             res_prompt_clean = vi_prompt_clean.delete_many({"metadata.video_id": azure_video_id})
             logger.info(f"Deleted {res_prompt_clean.deleted_count} docs from prompt_content_clean")
             
-            vi_prompt_index.delete_many({"video_id": azure_video_id}) 
+            # prompt_content_index: Linked by video_id
+            res_prompt_index = vi_prompt_index.delete_many({"video_id": azure_video_id})
+            logger.info(f"Deleted {res_prompt_index.deleted_count} docs from prompt_content_index") 
 
         # Delete the Video Document itself
         vi_videos.delete_one({"_id": vid_oid})

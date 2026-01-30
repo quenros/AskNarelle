@@ -152,7 +152,7 @@ function ManageKnowledgeBase(): JSX.Element {
         />
       )}
       {showSharePopup && (
-        <SharePopup onClose={handleCloseSharePopup} onCourseShared={handleCourseShare} courseName={shareName} />
+        <SharePopup onClose={handleCloseSharePopup} onCourseShared={handleCourseShared} courseName={shareName} />
       )}
     </main>
   );

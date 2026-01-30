@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  # The Reverse Proxy (Entry Point)
+  nginx:
+    image: nginx:alpine
+    container_name: reverse-proxy
+    ports:
+      - "80:80" 
+      - "443:443"
+    volumes:
+      # You might need to build a custom nginx image if volumes aren't supported easily in your setup
+      # Or paste this config into Azure's storage mount if persisted
+      # Simplest: Build a custom nginx image containing the conf
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - frontend
+      - backend
+
+  # The Backend API
+  backend:
+    # REPLACE WITH YOUR ACR IMAGE URL
+    image: myregistry.azurecr.io/flask-backend:latest 
+    container_name: flask-backend
+    expose:
+      - "5000"
+    restart: always
+
+  # The Frontend UI
+  frontend:
+    # REPLACE WITH YOUR ACR IMAGE URL
+    image: myregistry.azurecr.io/admin-app-prod:latest 
+    container_name: admin-app
+    expose:
+      - "3000"
+    restart: always

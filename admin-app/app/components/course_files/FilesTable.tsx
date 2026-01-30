@@ -153,22 +153,6 @@ const FilesTable: React.FC<FileTableProps> = ({
                   </a>
                 </Tooltip>
 
-                {/* Direct Chat Button for Video */}
-                {isVideo(record.name) && (
-                    <Tooltip title="Chat with this video">
-                        <Button 
-                            type="text" 
-                            icon={<MessageOutlined style={{ color: '#1890ff' }} />}
-                            onClick={() => {
-                                const videoIdentifier = record.vi_mongo_id || record.name;
-                                router.push(
-                                    `/knowledgebase_management/${encodeURIComponent(collectionName)}/${encodeURIComponent(domainName)}/preview/chat?id=${encodeURIComponent(videoIdentifier)}&name=${encodeURIComponent(record.name)}`
-                                );
-                            }}
-                        />
-                    </Tooltip>
-                )}
-
                 <Tooltip title="Open/download">
                   <a
                     href={record.url}
