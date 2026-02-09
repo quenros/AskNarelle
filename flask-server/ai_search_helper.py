@@ -129,7 +129,7 @@ def storeDocuments(containername, chunksize, overlap):
         key = os.environ.get('AZURE_COGNITIVE_SEARCH_API_KEY')
 
         # Ensure index exists (auto-create if missing)
-        ensure_index(containername, endpoint, key, embedding_dimenison)
+        ensure_index(containername, endpoint, key, 1536)
 
         search_client = SearchClient(endpoint=endpoint, index_name=containername, credential=AzureKeyCredential(key))
 

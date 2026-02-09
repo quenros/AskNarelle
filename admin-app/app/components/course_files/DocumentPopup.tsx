@@ -118,6 +118,7 @@ const DocumentPopup: React.FC<PopupProps> = ({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         courseCode: collectionName,
+        domainName: domainName,
         video: videoPayload,
         username: username,
       }),
@@ -149,7 +150,8 @@ const DocumentPopup: React.FC<PopupProps> = ({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             containername: collectionName,
-
+            chunksize: 1000,
+            overlap: 100, 
           }),
         });
       }

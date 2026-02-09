@@ -53,25 +53,26 @@ def delete_domain_virtual_folder(containerName, domainName):
     except Exception as error:
         print(f"Error deleting virtual folder: {error}")
         return False
-    
+
 def upload_to_azure_blob_storage(containerName, files, domainName):
     try:
         container_client = blob_service_client.get_container_client(containerName)
+        print(containerName)
 
         # List and delete existing blobs with the "new/" prefix
-        blobs_list = container_client.list_blobs(name_starts_with="new/")
-        for blob in blobs_list:
-            blob_client = container_client.get_blob_client(blob)
-            blob_client.delete_blob()
-            print(f"Deleted blob: {blob.name}")
+        # blobs_list = container_client.list_blobs(name_starts_with="new/")
+        # for blob in blobs_list:
+        #     blob_client = container_client.get_blob_client(blob)
+        #     blob_client.delete_blob()
+        #     print(f"Deleted blob: {blob.name}")
         
         for file in files:
             # Upload to "new/" folder
-            blob_client_in_folder = container_client.get_blob_client(f"new/{file.filename}")
-            file.seek(0)  # Ensure the file stream is at the beginning
-            print("Going to upload file")
-            upload_response1 = blob_client_in_folder.upload_blob(file, overwrite=True, connection_timeout=600, max_concurrency=2)
-            print(f"File uploaded successfully to folder. Request ID: {upload_response1['request_id']}")
+            # blob_client_in_folder = container_client.get_blob_client(f"new/{file.filename}")
+            # file.seek(0)  # Ensure the file stream is at the beginning
+            # print("Going to upload file")
+            # upload_response1 = blob_client_in_folder.upload_blob(file, overwrite=True, connection_timeout=600, max_concurrency=2)
+            # print(f"File uploaded successfully to folder. Request ID: {upload_response1['request_id']}")
             
             # Upload directly to the container root
           
@@ -90,15 +91,15 @@ def delete_from_azure_blob_storage(containerName, blobName, domainName, versionI
     try:
         # Get a reference to the container
         container_client = blob_service_client.get_container_client(containerName)
-        blobName_new = 'new/'+blobName
+        # blobName_new = 'new/'+blobName
         blobName_domain = f'{domainName}/{blobName}'
 
         # Get a block blob client
         blob_client = container_client.get_blob_client(blobName_domain)
        
-        blob_client_new = container_client.get_blob_client(blobName_new)
-        if blob_client_new.exists():
-            blob_client_new.delete_blob()
+        # blob_client_new = container_client.get_blob_client(blobName_new)
+        # if blob_client_new.exists():
+        #     blob_client_new.delete_blob()
         # Delete the blob
         if(isRootBlob == "yes"):
             blob_client.delete_blob()

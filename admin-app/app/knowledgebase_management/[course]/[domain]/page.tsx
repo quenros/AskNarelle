@@ -147,7 +147,7 @@ function Fileslist({
   const closeBlobDeletionPopup = () => setShowBlobDeletionPopup(false);
 
   // -------------------------------------------------------------------
-  // 1. Reusable Fetch Function (UPDATED)
+  // 1. Reusable Fetch Function 
   // -------------------------------------------------------------------
   const fetchDocs = useCallback(async (isPolling = false) => {
     if (!isPolling) setLoading(true);

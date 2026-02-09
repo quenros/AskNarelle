@@ -148,7 +148,7 @@ def get_course_videos_manage(course_code: Optional[str] = None):
             
         course_data["courseVideos"] = video_list
         result.append(course_data)
-        
+            
     return result
 
 def check_if_course_exist(course_code: str):
@@ -491,7 +491,7 @@ class VideoIndexerClient:
         resp.raise_for_status()
         return resp.json().get('id')
 
-    def wait_for_index_async(self, video_id: str, timeout_sec: int = 1200) -> Dict:
+    def wait_for_index_async(self, video_id: str, timeout_sec: int = 2000) -> Dict:
         self.get_account_async()
         loc = self.account["location"]
         acc_id = self.account["properties"]["accountId"]
@@ -533,7 +533,7 @@ class VideoIndexerClient:
         
         return base64.b64encode(resp.content).decode('utf-8')
 
-    # --- NEW: Get Prompt Content (Insights) with Retry ---
+    # --- Get Prompt Content (Insights) with Retry ---
     def generate_prompt_content_async(self, video_id:str) -> None:
         """
         Initiate generation of new prompt content for the video.
@@ -622,6 +622,7 @@ class VideoIndexerClient:
 # --------------------------------------------------------------------------
 def index_video_and_update_metadata(
     course_doc: Dict[str, Any],
+    domain_name: str,
     video_object_id: ObjectId,
     video_name: str,
     base64_encoded_video: str,
@@ -641,16 +642,16 @@ def index_video_and_update_metadata(
         buf.name = video_name
 
         # Upload to Blob Storage first
-        container_name = course_doc["course_code"].lower()
-        blob_name = f"videos/{video_name}"
-        container_client = blob_service_client.get_container_client(container_name)
-        try:
-            container_client.create_container()
-        except:
-            pass  # Container might already exist
-        blob_client = container_client.get_blob_client(blob_name)
-        buf.seek(0)
-        blob_client.upload_blob(buf, overwrite=True)
+        container_name = course_doc["course_code"].lower() +"/" +domain_name
+        blob_name = f"{video_name}"
+        # container_client = blob_service_client.get_container_client(container_name)
+        # try:
+        #     container_client.create_container()
+        # except:
+        #     pass  # Container might already exist
+        # blob_client = container_client.get_blob_client(blob_name)
+        # buf.seek(0)
+        # blob_client.upload_blob(buf, overwrite=True)
         
         # Generate SAS URL
         sas_url = build_blob_sas_url(container_name, blob_name)

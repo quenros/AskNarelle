@@ -237,7 +237,7 @@ const FilesTable: React.FC<FileTableProps> = ({
                 description={
                   videoFile
                     ? "Removes video record, index, and blob."
-                    : "Removes the record (blob if root)."
+                    : "Removes the record."
                 }
                 okText="Delete"
                 okButtonProps={{ danger: true }}
@@ -248,7 +248,7 @@ const FilesTable: React.FC<FileTableProps> = ({
                     d.name,
                     d.version_id,
                     d.is_root_blob,
-                    d.vi_mongo_id // PASS THE ID HERE
+                    d.vi_mongo_id 
                   )
                 }
               >

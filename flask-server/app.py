@@ -279,6 +279,7 @@ def get_domains(username, collection_name):
 )
 def get_files(username, collection_name, domain_name):
     documents_status = get_documents(username, collection_name, domain_name)
+    print(documents_status)
 
     # if we got a real list of docs back, attach fresh SAS URLs and return
     if isinstance(documents_status, list):
@@ -385,7 +386,7 @@ def upload_blob(collection_name, domain_name, username):
 )
 def upload_document(collection_name, domain_name, username):
     files = request.files.getlist("files")
-    container_name = collection_name.lower().replace(" ", "-")
+    container_name = collection_name.lower().replace(" ", "-")+"/"+domain_name
     files_with_links, activities = [], []
 
     # only text-like files are vectorized
@@ -393,9 +394,11 @@ def upload_document(collection_name, domain_name, username):
 
     try:
         container_client = blob_service_client.get_container_client(container_name)
+        print(container_name)
 
         for file in files:
-            blob_path = f"{domain_name}/{file.filename}"
+            # blob_path = f"{domain_name}/{file.filename}"
+            blob_path = f"{file.filename}"
             blob_client_direct = container_client.get_blob_client(blob_path)
 
             # Properties
@@ -438,10 +441,10 @@ def upload_document(collection_name, domain_name, username):
                 time_str = ts_local.strftime("%H:%M:%S")
 
             # SAS URL
-            sas_token = generate_sas_token(container_name, blob_path)
+            sas_token = generate_sas_token(collection_name, blob_path)
             blob_url = (
                 f"https://{blob_service_client.account_name}.blob.core.windows.net/"
-                f"{container_name}/{blob_path}?{sas_token}"
+                f"{collection_name}/{blob_path}?{sas_token}"
             )
 
             # Flag whether this file is vectorized (videos -> no)
@@ -450,7 +453,7 @@ def upload_document(collection_name, domain_name, username):
 
             files_with_links.append(
                 {
-                    "course_name": container_name,
+                    "course_name": collection_name,
                     "domain": domain_name,
                     "name": file.filename,
                     "url": blob_url,
@@ -631,9 +634,9 @@ def delete_file(collection_name, domain_name):
                 return jsonify({"error": "Failed to delete document"}), 500
         else:
             return jsonify(
-                {"error": "Failed to upload file to Azure Blob Storage"}), 500
+                {"error": "Failed to delete file to Azure Blob Storage"}), 500
     except Exception as error:
-        print(f"Error processing file upload: {error}")
+        print(f"Error processing file deletion: {error}")
         return jsonify({"error": "Internal server error"}), 500
 
 
@@ -926,6 +929,7 @@ def vi_create_course():
 def vi_upload_videos():
     body = request.get_json(silent=True) or {}
     course_code = (body.get("courseCode") or "").strip()
+    domain_name = (body.get("domainName") or "").strip()
     videos = body.get("video") or []
 
     if not course_code:
@@ -959,6 +963,7 @@ def vi_upload_videos():
                 target=index_video_and_update_metadata,
                 kwargs={
                     "course_doc": course_doc,
+                    "domain_name": domain_name,
                     "video_object_id": video_oid,
                     "video_name": name,
                     "base64_encoded_video": b64,
@@ -995,6 +1000,7 @@ def get_video_statuses(course_code):
         status_map = {}
         for v in target_course.get("courseVideos", []):
             name = v.get("videoName")
+            # print(name)
             status = v.get("status")
             vi_id = v.get("_id") # Internal VI Mongo ID
             
