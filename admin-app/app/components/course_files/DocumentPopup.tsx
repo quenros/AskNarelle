@@ -6,8 +6,6 @@ import {
   Typography,
   Space,
   Steps,
-  Switch,
-  Slider,
   message,
 } from "antd";
 import type { UploadFile } from "antd/es/upload/interface";
@@ -43,10 +41,6 @@ const DocumentPopup: React.FC<PopupProps> = ({
   const [open] = useState(true);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [loading, setLoading] = useState(false);
-
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [chunkSize, setChunkSize] = useState(1000);
-  const [overlap, setOverlap] = useState(100);
 
   // Steps: 0=Select, 1=Blob, 2=Vector, 3=Database / VI
   const [step, setStep] = useState(0);
@@ -119,7 +113,7 @@ const DocumentPopup: React.FC<PopupProps> = ({
     setStep(3); // Visual indication we are on the final step
     
     // Call the new Async Endpoint
-    await doFetch("http://localhost:5000/vi/videos", {
+    await doFetch("/vi/videos", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -132,7 +126,7 @@ const DocumentPopup: React.FC<PopupProps> = ({
 
   const handleSubmit = async () => {
     if (fileList.length === 0) {
-      message.warning("Please select at least one file.");
+      message.warning("Please select a file.");
       return;
     }
     setLoading(true);
@@ -141,22 +135,21 @@ const DocumentPopup: React.FC<PopupProps> = ({
     try {
       const formData = buildFormData(fileList);
       
-      // 1) Upload all to Blob Storage
+      //  Upload to Blob Storage
       await doFetch(
-        `http://localhost:5000/api/${collectionName}/${domainName}/${username}/createblob`,
+        `/api/${collectionName}/${domainName}/${username}/createblob`,
         { method: "PUT", body: formData }
       );
 
-      // 2) DOCS → Vector Store
+      //  DOCS to Vector Store
       if (hasDocs) {
         setStep(2);
-        await doFetch("http://localhost:5000/vectorstore", {
+        await doFetch("/vectorstore", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             containername: collectionName,
-            chunksize: chunkSize,
-            overlap: overlap,
+
           }),
         });
       }
@@ -164,11 +157,10 @@ const DocumentPopup: React.FC<PopupProps> = ({
       // 3) Create Document Records in MongoDB (Generic)
       setStep(3);
       await doFetch(
-        `http://localhost:5000/api/${collectionName}/${domainName}/${username}/createdocument`,
+        `/api/${collectionName}/${domainName}/${username}/createdocument`,
         { method: "PUT", body: buildFormData(fileList) }
       );
 
-      // 4) VIDEOS → VI API (This initiates the background indexing)
       if (hasVideos) {
         await uploadVideosViaVI();
       }
@@ -193,7 +185,7 @@ const DocumentPopup: React.FC<PopupProps> = ({
 
   return (
     <Modal
-      title="Add files"
+      title="Add File"
       open={open}
       onCancel={loading ? undefined : onClose}
       footer={[
@@ -226,7 +218,8 @@ const DocumentPopup: React.FC<PopupProps> = ({
         />
 
         <Dragger
-          multiple
+          multiple={false} 
+          maxCount={1} 
           fileList={fileList}
           onChange={({ fileList }) => setFileList(fileList)}
           beforeUpload={beforeUpload}
@@ -238,64 +231,22 @@ const DocumentPopup: React.FC<PopupProps> = ({
             <InboxOutlined />
           </p>
           <p className="ant-upload-text">
-            Click or drag files to this area to upload
+            Click or drag a file to this area to upload
           </p>
           <p className="ant-upload-hint">
-            Allowed: PDF, DOCX, PPTX, TXT, CSV, XLSX (docs go to Blob → Vector → DB) and
-            videos (MP4, MOV, MKV, WEBM, AVI) which go to Blob → DB and are 
-            registered with the Video Indexer API.
+            Allowed: PDF, DOCX, PPTX, TXT, CSV, XLSX, MP4, MOV, MKV, WEBM, AVI.
           </p>
         </Dragger>
 
         <Space direction="vertical" style={{ width: "100%" }}>
           <Text type="secondary">
             {hasDocs
-              ? `Will vectorize ${docFiles.length} document(s).`
-              : "No documents selected for vectorization."}
+              ? "1 document selected for vectorization."
+              : hasVideos 
+                ? "1 video selected for indexing."
+                : ""}
           </Text>
-          {hasVideos && (
-            <Text type="secondary">
-              {videoFiles.length} video file(s) will be stored in Blob / DB and
-              sent to the Video Indexer API.
-            </Text>
-          )}
         </Space>
-
-        <Space align="center" style={{ width: "100%" }}>
-          <Switch
-            checked={showAdvanced}
-            onChange={setShowAdvanced}
-            disabled={loading}
-          />
-          <Text>Advanced chunk settings</Text>
-        </Space>
-
-        {showAdvanced && (
-          <Space direction="vertical" style={{ width: "100%" }}>
-            <div>
-              <Text strong>Chunk size</Text>
-              <Slider
-                min={500}
-                max={2000}
-                step={50}
-                value={chunkSize}
-                onChange={(v) => setChunkSize(v as number)}
-                tooltip={{ open: true }}
-              />
-            </div>
-            <div>
-              <Text strong>Overlap</Text>
-              <Slider
-                min={0}
-                max={500}
-                step={10}
-                value={overlap}
-                onChange={(v) => setOverlap(v as number)}
-                tooltip={{ open: true }}
-              />
-            </div>
-          </Space>
-        )}
       </Space>
     </Modal>
   );

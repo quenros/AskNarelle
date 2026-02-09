@@ -57,7 +57,7 @@ export default function Home() {
   useEffect(() => {
     if (username) {
       fetch(
-        `http://localhost:5000/chats/totalUsers/${username}`
+        `/chats/totalUsers/${username}`
       )
         .then((r) => {
           if (!r.ok) throw new Error("Failed to fetch total users");
@@ -67,7 +67,7 @@ export default function Home() {
         .catch((e) => console.error("Error fetching total users:", e));
 
       fetch(
-        `http://localhost:5000/chats/totalQueries/${username}`
+        `/chats/totalQueries/${username}`
       )
         .then((r) => {
           if (!r.ok) throw new Error("Failed to fetch total queries");

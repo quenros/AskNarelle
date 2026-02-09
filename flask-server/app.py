@@ -77,7 +77,7 @@ from model import VideoDetails
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"]}})
 
 blob_service_client = BlobServiceClient.from_connection_string(
     os.environ.get("AZURE_CONN_STRING")
@@ -163,11 +163,14 @@ def createIndex():
     data = request.json
     collection_name = data.get("collectionName")
 
-    create_index_status = createIndexFunction(collection_name)
-    if create_index_status:
-        return jsonify({"message": "Index created successfully"}), 201
+    success, msg = createIndexFunction(collection_name)
+
+    if success:
+        return jsonify({"message": msg}), 201
     else:
-        return jsonify({"message": "Failed to create index"}), 500
+        # Send the specific error message back to the frontend
+        print(f"Index creation failed: {msg}")
+        return jsonify({"error": msg}), 500
 
 
 @app.route("/api/createcollection", methods=["PUT"])

@@ -33,7 +33,7 @@ const ManageAccessPopup: React.FC<PopupProps> = ({ onClose, courseName }) => {
     const load = async () => {
       try {
         setLoading(true);
-        const resp = await fetch(`http://localhost:5000/manageaccess/${courseName}`);
+        const resp = await fetch(`/manageaccess/${courseName}`);
         if (!resp.ok) throw new Error("Failed to fetch users");
         const data: string[] = await resp.json();
         setUsers(data || []);
@@ -56,7 +56,7 @@ const ManageAccessPopup: React.FC<PopupProps> = ({ onClose, courseName }) => {
   const handleDeleteUser = async (user: string) => {
     try {
       setDeleting(user);
-      const resp = await fetch("http://localhost:5000/manageaccess/deleteUser", {
+      const resp = await fetch("/manageaccess/deleteUser", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ collectionName: courseName, username: user }),

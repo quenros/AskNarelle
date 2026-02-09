@@ -389,7 +389,7 @@ class ChatHelper:
             # Indexes
             self.vector_store.create_index(
                 num_lists=100, dimensions=1536, 
-                similarity_algorithm=CosmosDBSimilarityType.COS, 
+                similarity=CosmosDBSimilarityType.COS, 
                 kind=CosmosDBVectorSearchType.VECTOR_IVF, 
                 m=16, ef_construction=64
             )

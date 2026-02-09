@@ -20,6 +20,9 @@ from azure.identity import DefaultAzureCredential
 # Models
 from model import CourseDetails, VideoDetails
 
+# Import Transcript Helper
+from transcript_helper import transcript_client
+
 # LangChain / AI
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 from langchain_community.vectorstores import AzureCosmosDBVectorSearch
@@ -33,10 +36,11 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# Import Transcript Helper
-from transcript_helper import transcript_client
+from blob_storage_helper import build_blob_sas_url
+from azure.storage.blob import BlobServiceClient
+import os
 
-load_dotenv()
+blob_service_client = BlobServiceClient.from_connection_string(os.environ.get('AZURE_CONN_STRING'))
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +55,15 @@ class VIConsts:
         self.AccountName = os.environ.get("VIDEO_INDEXER_ACCOUNT_NAME")
         self.AccountId = os.environ.get("VIDEO_INDEXER_ACCOUNT_ID")
         self.ApiVersion = os.environ.get("VIDEO_INDEXER_API_VERSION", "2022-08-01")
-        self.ApiEndpoint = "https://api.videoindexer.ai"
+        self.ApiEndpoint = os.environ.get("API_ENDPOINT")
         self.AzureResourceManager = "https://management.azure.com"
         self.Location = os.environ.get("VIDEO_INDEXER_LOCATION", "trial")
+
+        self.AZURE_TENANT_ID = os.environ.get("AZURE_TENANT_ID")
+        self.AZURE_CLIENT_ID = os.environ.get("AZURE_CLIENT_ID")
+        # Accept either AZURE_CLIENT_SECRET (expected by DefaultAzureCredential)
+        # or AZURE_SECRET_ID (legacy/mistyped name) as a fallback.
+        self.AZURE_CLIENT_SECRET = os.environ.get("AZURE_CLIENT_SECRET")
 
 # --------------------------------------------------------------------------
 # 2. Database Setup
@@ -234,7 +244,6 @@ def delete_all_video_entries_for_course(course_code: str):
         # Iterate and Delete each video and its related data
         count = 0
         for vid_oid in video_ids:
-            # We convert ObjectId to string because delete_video_entry_from_db expects string
             success = delete_video_entry_from_db(str(vid_oid))
             if success:
                 count += 1
@@ -253,26 +262,33 @@ def delete_all_video_entries_for_course(course_code: str):
 
 def delete_video_entry_from_db(video_mongo_id: str):
     """
-    Removes video from Video collection and Course reference.
+    Removes video from Azure Video Indexer, Video collection, and Course reference.
     Also cleans up all related collections:
-    - transcript_full (by video_reference_id)
-    - video_indexer_raw (by video_indexer_id)
-    - prompt_content_raw (by video_id)
-    - prompt_content_clean (by metadata.video_id)
-    - prompt_content_index (by video_id)
+    - transcript_full, video_indexer_raw, prompt_content_raw, prompt_content_clean, prompt_content_index
     """
     try:
         vid_oid = ObjectId(video_mongo_id)
         
-        # Get the Video Document first to find the Azure Video ID
+        # 1. Get the Video Document first to find the Azure Video ID
         video_doc = vi_videos.find_one({"_id": vid_oid})
         if not video_doc:
             logger.warning(f"Video document {video_mongo_id} not found in DB.")
             return False
         
         azure_video_id = video_doc.get("video_id") # The external ID (e.g., 5wzo7q39al)
+
+        # --- Delete from Azure Video Indexer ---
+        if azure_video_id:
+            try:
+                logger.info(f"Attempting to delete video {azure_video_id} from Azure Video Indexer...")
+                client = VideoIndexerClient()
+                client.delete_video(azure_video_id)
+                logger.info(f"Successfully deleted {azure_video_id} from Azure.")
+            except Exception as e:
+                # We log the error but CONTINUE to delete from DB to prevent "Zombie" records
+                logger.error(f"Failed to delete video from Azure (might already be gone): {e}")
         
-        # Delete from Course Reference
+        #  Delete from Course Reference
         course_ref_id = video_doc.get("course_reference_id")
         if course_ref_id:
             vi_courses.update_one({"_id": course_ref_id}, {"$pull": {"videos": vid_oid}})
@@ -338,25 +354,63 @@ class VideoIndexerClient:
         self.start_authentication_scheduler()
 
     def _get_arm_access_token(self):
-        credential = DefaultAzureCredential()
-        scope = "https://management.azure.com/.default"
-        token = credential.get_token(scope)
-        return token.token
+        try:
+            logger.info("[ARM AUTH] Starting ARM Token acquisition...")
+            
+            credential = DefaultAzureCredential()
+            scope = f"{self.consts.AzureResourceManager}/.default"
+            
+            logger.info(f"[ARM AUTH] Attempting to get token for scope: {scope}")
+            
+            # Attempt to get the token
+            token_obj = credential.get_token(scope)
+            token = token_obj.token
+            
+            # LOGGING: Success (never print the full token, just length/preview)
+            logger.info(f"[ARM AUTH] Success! ARM Token acquired. (Length: {len(token)})")
+            return token
+
+        except Exception as e:
+            # LOGGING: Critical Failure
+            logger.error(f"[ARM AUTH FAILED] DefaultAzureCredential could not get a token.")
+            logger.error(f"[ARM AUTH FAILED] Error Details: {str(e)}")
+            
+            # Common hint for the user in the logs
+            if "EnvironmentCredential" in str(e):
+                logger.error("[HINT] Check AZURE_CLIENT_ID, AZURE_TENANT_ID, and AZURE_CLIENT_SECRET in .env")
+            
+            raise e
 
     def _get_account_access_token(self, permission="Contributor", scope="Account", video_id=None):
         headers = {"Authorization": f"Bearer {self.arm_access_token}"}
+        
+        # Build the URL
         url = (
             f"{self.consts.AzureResourceManager}/subscriptions/{self.consts.SubscriptionId}"
             f"/resourceGroups/{self.consts.ResourceGroup}"
             f"/providers/Microsoft.VideoIndexer/accounts/{self.consts.AccountName}"
             f"/generateAccessToken?api-version={self.consts.ApiVersion}"
         )
+        
+        # LOGGING: Print the URL being attempted
+        logger.info(f"[AUTH] Requesting VI Token via: {url}")
+        
         body = {"permissionType": permission, "scope": scope}
         if video_id: body["videoId"] = video_id
         
-        resp = requests.post(url, json=body, headers=headers)
-        resp.raise_for_status()
-        return resp.json().get("accessToken")
+        try:
+            resp = requests.post(url, json=body, headers=headers)
+            resp.raise_for_status() # This raises the exception if 400/401/404
+            
+            token = resp.json().get("accessToken")
+            logger.info(f"[AUTH] Success! Token generated (Length: {len(token)})")
+            return token
+            
+        except requests.exceptions.HTTPError as e:
+            # LOGGING: Print the detailed error from Azure
+            logger.error(f"[AUTH FAILED] Status: {resp.status_code}")
+            logger.error(f"[AUTH FAILED] Response: {resp.text}")
+            raise e # Re-raise so we know it failed
 
     def authenticate_async(self) -> None:
         try:
@@ -393,10 +447,20 @@ class VideoIndexerClient:
 
     # --- Core API Operations ---
 
-    def file_upload_async(self, media: io.BytesIO, video_name: str, video_description: str = '', 
-                          excluded_ai: list = None, privacy='Private') -> str:
+    def file_upload_async(self, media: io.BytesIO = None, video_name: str = '', video_description: str = '', 
+                          excluded_ai: list = None, privacy='Private', video_url: str = None) -> str:
         if excluded_ai is None: excluded_ai = []
         
+        # LOGGING: Check if we have a token before trying
+        if not self.vi_access_token:
+            logger.warning("[UPLOAD] VI Access Token is empty! Attempting to refresh...")
+            self.authenticate_async()
+            
+            # If still empty, stop immediately
+            if not self.vi_access_token:
+                logger.error("[UPLOAD] CRITICAL: Cannot upload. Access Token is MISSING.")
+                raise RuntimeError("Authentication Failed: No Access Token available.")
+
         self.get_account_async() 
         loc = self.account["location"]
         acc_id = self.account["properties"]["accountId"]
@@ -410,8 +474,20 @@ class VideoIndexerClient:
             'indexingPreset': 'Default'
         }
         if excluded_ai: params['excludedAI'] = ','.join(excluded_ai)
+        if video_url:
+            params['videoUrl'] = video_url
 
-        resp = requests.post(url, params=params, files={'file': (video_name, media, 'video/mp4')})
+        if video_url:
+            resp = requests.post(url, params=params)
+        else:
+            resp = requests.post(url, params=params, files={'file': (video_name, media, 'video/mp4')})
+        if not resp.ok:
+            logger.error(f"--- UPLOAD FAILED ---")
+            logger.error(f"Status Code: {resp.status_code}")
+            logger.error(f"Azure Message: {resp.text}")
+            logger.error(f"Azure resp: {resp}")
+            logger.error(f"---------------------")
+
         resp.raise_for_status()
         return resp.json().get('id')
 
@@ -443,7 +519,7 @@ class VideoIndexerClient:
 
     def get_thumbnail_base64(self, video_id: str, thumbnail_id: str) -> str:
         self.get_account_async()
-        vid_token = self._get_account_access_token(scope="Video", video_id=video_id)
+        vid_token = self._get_account_access_token(scope="Account", video_id=video_id)
         
         loc = self.account["location"]
         acc_id = self.account["properties"]["accountId"]
@@ -564,9 +640,24 @@ def index_video_and_update_metadata(
         buf = io.BytesIO(video_bytes)
         buf.name = video_name
 
-        # 1. Upload to Azure
+        # Upload to Blob Storage first
+        container_name = course_doc["course_code"].lower()
+        blob_name = f"videos/{video_name}"
+        container_client = blob_service_client.get_container_client(container_name)
+        try:
+            container_client.create_container()
+        except:
+            pass  # Container might already exist
+        blob_client = container_client.get_blob_client(blob_name)
+        buf.seek(0)
+        blob_client.upload_blob(buf, overwrite=True)
+        
+        # Generate SAS URL
+        sas_url = build_blob_sas_url(container_name, blob_name)
+
+        # 1. Upload to Azure VI using URL
         logger.info(f"Starting VI upload for {video_object_id}...")
-        vi_video_id = client.file_upload_async(buf, video_name, video_description)
+        vi_video_id = client.file_upload_async(video_name=video_name, video_description=video_description, video_url=sas_url)
         update_video_id_thumbnail(video_object_id, vi_video_id, "")
         
         # 2. Wait for Indexing

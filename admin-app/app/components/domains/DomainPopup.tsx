@@ -22,7 +22,7 @@ const DomainPopup: React.FC<PopupProps> = ({ onClose, onDomainCreated, collectio
       const { domainName } = await form.validateFields();
       setIsLoading(true);
 
-      const resp = await fetch('http://localhost:5000/api/createdomain', {
+      const resp = await fetch('/api/createdomain', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

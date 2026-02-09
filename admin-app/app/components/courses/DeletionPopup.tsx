@@ -14,7 +14,7 @@ const DeletionPopup: React.FC<DeletionPopupProps> = ({ onClose, onCourseDeleted,
   const handleDelete = async () => {
     try {
       setIsLoading(true);
-      const resp = await fetch('http://localhost:5000/api/deletecourse', {
+      const resp = await fetch('/api/deletecourse', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ collectionName: courseName }),

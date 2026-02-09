@@ -24,7 +24,7 @@ const SharePopup: React.FC<PopupProps> = ({ onClose, onCourseShared, courseName 
       const { email } = await form.validateFields();
       setIsLoading(true);
 
-      const resp = await fetch('http://localhost:5000/invite', {
+      const resp = await fetch('/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, course: courseName }),

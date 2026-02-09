@@ -19,7 +19,7 @@ const DomainDeletionPopup: React.FC<DeletionPopupProps> = ({ onClose, onCourseDe
 
   const handleDelete = () => {
     setIsLoading(true)
-    fetch('http://localhost:5000/api/deletedomain', {
+    fetch('/api/deletedomain', {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',

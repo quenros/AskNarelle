@@ -53,7 +53,7 @@ const FileMovementPopup: React.FC<FileMovementPopupProps> = ({
       setLoading(true);
 
       // 1) Move to vector store (embed + upsert)
-      const moveResp = await fetch(`http://localhost:5000/movetovectorstore`, {
+      const moveResp = await fetch(`/movetovectorstore`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -75,7 +75,7 @@ const FileMovementPopup: React.FC<FileMovementPopupProps> = ({
       }
 
       // 2) Update DB flag / activity
-      const updResp = await fetch(`http://localhost:5000/updatemovement`, {
+      const updResp = await fetch(`/updatemovement`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

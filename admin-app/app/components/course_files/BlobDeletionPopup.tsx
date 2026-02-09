@@ -32,7 +32,7 @@ const BlobDeletionPopup: React.FC<BlobDeletionPopupProps> = ({
     try {
       setLoading(true);
       const resp = await fetch(
-        `http://localhost:5000/api/${collectionName}/${domainName}/deletedocument`,
+        `/api/${collectionName}/${domainName}/deletedocument`,
         {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },

@@ -26,7 +26,7 @@ const ChartThree: React.FC = () => {
   useEffect(() => {
     if (!username) return;
 
-    fetch(`http://localhost:5000/chats/userSentiments/${username}`)
+    fetch(`/chats/userSentiments/${username}`)
     .then(response => {
       if (!response.ok) {
         throw new Error('Failed to fetch sentiments');

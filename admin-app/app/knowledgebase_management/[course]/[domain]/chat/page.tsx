@@ -81,14 +81,14 @@ const ChatPage: React.FC = () => {
     scrollToBottom();
   }, [uiMessages]);
 
-  // --- NEW: Fetch Chat History on Mount ---
+  // Fetch Chat History on Mount 
   useEffect(() => {
     const fetchHistory = async () => {
         if (!course || !userId || userId === "anonymous") return;
         
         setHistoryLoading(true);
         try {
-            const res = await fetch(`http://localhost:5000/api/chat/history/${encodeURIComponent(course)}?user_id=${encodeURIComponent(userId)}`);
+            const res = await fetch(`/api/chat/history/${encodeURIComponent(course)}?user_id=${encodeURIComponent(userId)}`);
             if (res.ok) {
                 const data = await res.json();
                 const history = data.history || [];
@@ -154,10 +154,10 @@ const ChatPage: React.FC = () => {
 
       if (isCourseChat) {
         // Course Chat Endpoint
-        url = `http://localhost:5000/api/chat/${encodeURIComponent(course)}`;
+        url = `/api/chat/${encodeURIComponent(course)}`;
       } else {
         // Single Video Endpoint
-        url = `http://localhost:5000/chat/${encodeURIComponent(videoId)}`;
+        url = `/chat/${encodeURIComponent(videoId)}`;
         payload.course_code = course; 
         payload.user_id = userId;
       }
@@ -200,31 +200,30 @@ const ChatPage: React.FC = () => {
           padding: "0 24px",
           display: "flex",
           alignItems: "center",
+          justifyContent: "space-between",
           height: 64,
           zIndex: 10,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <Button
-            icon={<ArrowLeftOutlined />}
-            onClick={() => router.back()}
-            type="text"
-            style={{ fontSize: 16 }}
+        <div style={{ display: "flex", flexDirection: "column", justifyContent: "center" }}>
+          <Breadcrumb
+            items={[
+              { title: course },
+              { title: domain },
+              { title: isCourseChat ? "Course Chat" : "Video Chat" },
+            ]}
+            style={{ fontSize: 12, lineHeight: "20px" }}
           />
-          <div style={{ display: "flex", flexDirection: "column", justifyContent: "center" }}>
-            <Breadcrumb
-              items={[
-                { title: course },
-                { title: domain },
-                { title: isCourseChat ? "Course Chat" : "Video Chat" },
-              ]}
-              style={{ fontSize: 12, lineHeight: "20px" }}
-            />
-            <Title level={5} style={{ margin: 0, lineHeight: "24px" }}>
-              {chatTitle}
-            </Title>
-          </div>
+          <Title level={5} style={{ margin: 0, lineHeight: "24px" }}>
+            {chatTitle}
+          </Title>
         </div>
+        <Button
+          icon={<ArrowLeftOutlined />}
+          onClick={() => router.push(`/knowledgebase_management/${encodeURIComponent(course)}/${encodeURIComponent(domain)}`)}
+          type="text"
+          style={{ fontSize: 16 }}
+        />
       </Header>
 
       {/* --- CHAT CONTENT --- */}

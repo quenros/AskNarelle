@@ -1,31 +1,40 @@
-// const NEXTJS_APP_CLIENT_ID='ENTER_CLIENT_ID_HERE'
-// const NEXTJS_APP_AUTHORITY='https://login.microsoftonline.com/ENTER_TENANT_ID_HERE'
+import { LogLevel } from "@azure/msal-browser";
 
-const NEXTJS_APP_CLIENT_ID= '4b2ecccd-35e0-466f-bf23-31a8d87931e7'
-// '509f0927-90b2-4261-b44d-1fb9b18c0ae9'
-
-
-const NEXTJS_APP_AUTHORITY='https://login.microsoftonline.com/d6bee465-7028-48e4-b4f5-ed56a9a83dbd'
-
-// Config object to be passed to Msal on creation
 export const msalConfig = {
     auth: {
-        clientId: NEXTJS_APP_CLIENT_ID,
-        authority: NEXTJS_APP_AUTHORITY,
-        redirectUri: "/",
-        postLogoutRedirectUri: "/"
+        clientId: "e0a0692d-739b-46b0-bc9e-3561f3d44800",
+        // SINGLE TENANT: Use your specific Tenant ID (0714...)
+        authority: "https://login.microsoftonline.com/0714d781-75cf-4091-80d4-3aacfd1acc4f", // your tenant ID
+        
+        // Redirect URI: Uses Env Var in Azure, or localhost for dev
+        redirectUri: process.env.NEXT_PUBLIC_REDIRECT_URI || "http://localhost:3000/",
+    },
+    cache: {
+        cacheLocation: "sessionStorage",
+        storeAuthStateInCookie: false,
     },
     system: {
-        allowNativeBroker: false, // Disables WAM Broker
-    }
+        loggerOptions: {
+            loggerCallback: (level: LogLevel, message: string, containsPii: boolean) => {
+                if (containsPii) { return; }
+                switch (level) {
+                    case LogLevel.Error:
+                        console.error(message);
+                        return;
+                    // Keep logs clean by commenting out info/verbose unless debugging
+                    // case LogLevel.Info: console.info(message); return;
+                    // case LogLevel.Verbose: console.debug(message); return;
+                    // case LogLevel.Warning: console.warn(message); return;
+                }
+            },
+        },
+    },
 };
 
-// Add here scopes for id token to be used at MS Identity Platform endpoints.
 export const loginRequest = {
-    scopes: ["User.Read"]
+    scopes: ["User.Read", "Directory.Read.All"],
 };
 
-// Add here the endpoints for MS Graph API services you would like to use.
 export const graphConfig = {
-    graphMeEndpoint: "https://graph.microsoft.com/v1.0/me"
+    graphMeEndpoint: "https://graph.microsoft.com/v1.0/me",
 };

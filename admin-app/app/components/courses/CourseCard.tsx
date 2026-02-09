@@ -32,7 +32,7 @@ const CourseCard: React.FC<CourseProps> = ({
   useEffect(() => {
     if (!courseName) return;
     
-    fetch(`http://localhost:5000/api/${courseName}/totalFiles`)
+    fetch(`/api/${courseName}/totalFiles`)
       .then((response) => {
         if (!response.ok) throw new Error("Failed to fetch collections");
         return response.json();
@@ -99,7 +99,7 @@ const CourseCard: React.FC<CourseProps> = ({
               />
             </Tooltip>
 
-            <Tooltip title="Share">
+            {/* <Tooltip title="Share">
               <Button
                 type="text"
                 shape="circle"
@@ -109,7 +109,7 @@ const CourseCard: React.FC<CourseProps> = ({
                 }}
                 icon={<FaShare size={16} color="#2C3463" />}
               />
-            </Tooltip>
+            </Tooltip> */}
 
             <Tooltip title="Delete">
               <Popconfirm

@@ -38,7 +38,7 @@ const PreviewPage: React.FC = () => {
     setError(null);
 
     fetch(
-      `http://localhost:5000/api/preview/${encodeURIComponent(
+      `/api/preview/${encodeURIComponent(
         course as string
       )}/${encodeURIComponent(domain as string)}?name=${encodeURIComponent(
         name

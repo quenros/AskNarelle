@@ -20,7 +20,7 @@ const ChartOne: React.FC = () => {
   useEffect(() => {
     if (!username) return;
 
-    fetch(`http://localhost:5000/chats/queriesByMonth/${username}`)
+    fetch(`/chats/queriesByMonth/${username}`)
     .then(response => {
       if (!response.ok) throw new Error('Failed to fetch data');
       return response.json();

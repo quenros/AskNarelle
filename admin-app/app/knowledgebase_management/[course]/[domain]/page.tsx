@@ -154,7 +154,7 @@ function Fileslist({
 
     try {
       const docRes = await fetch(
-        `http://localhost:5000/api/collections/${username}/${collectionName}/${domainName}`
+        `/api/collections/${username}/${collectionName}/${domainName}`
       );
       
       if (docRes.status === 403) { setAuthorised(false); setDocuments([]); return; }
@@ -164,7 +164,7 @@ function Fileslist({
       const docs: Document[] = await docRes.json();
 
       // Fetch Video Statuses
-      const statusRes = await fetch(`http://localhost:5000/api/vi/status/${collectionName}`);
+      const statusRes = await fetch(`/api/vi/status/${collectionName}`);
       
       // Define the type of the response map
       type StatusInfo = { status: string; vi_mongo_id: string };

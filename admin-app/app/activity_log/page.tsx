@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { msalConfig } from "@/authConfig";
 import { PublicClientApplication } from "@azure/msal-browser";
 import withAuth from "../components/authentication/WithAuth";
@@ -22,7 +23,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import dayjs, { Dayjs } from "dayjs";
 import isBetween from "dayjs/plugin/isBetween";
-import { SearchOutlined, ReloadOutlined } from "@ant-design/icons";
+import { SearchOutlined, ReloadOutlined, ArrowLeftOutlined } from "@ant-design/icons";
 
 dayjs.extend(isBetween);
 const { RangePicker } = DatePicker;
@@ -42,6 +43,7 @@ interface Activity {
 const msalInstance = new PublicClientApplication(msalConfig);
 
 function ActivityLog(): JSX.Element {
+  const router = useRouter();
   const accounts = msalInstance.getAllAccounts();
   const viewer = accounts[0]?.username;
 
@@ -65,7 +67,7 @@ function ActivityLog(): JSX.Element {
     setErrorMsg(null);
 
     fetch(
-      `http://localhost:5000/activities/${encodeURIComponent(
+      `/activities/${encodeURIComponent(
         viewer
       )}/viewactivities`,
       { signal: ac.signal }
@@ -204,6 +206,14 @@ function ActivityLog(): JSX.Element {
   return (
     <main className="flex flex-col min-h-screen pt-24 px-6 sm:px-10">
       <div className="mb-4">
+        <Button
+          icon={<ArrowLeftOutlined />}
+          onClick={() => router.push('/')}
+          type="text"
+          style={{ fontSize: 16, marginBottom: 16 }}
+        >
+          Back to Dashboard
+        </Button>
         <Space size="middle" wrap>
           <Input
             allowClear

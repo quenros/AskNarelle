@@ -51,7 +51,7 @@ const FileDeletionPopup: React.FC<FileDeletionPopupProps> = ({
       // Only attempt if we actually have a Video Indexer ID passed to us
       if (vi_mongo_id) {
         try {
-          const vResp = await fetch(`http://localhost:5000/api/vi/delete_video`, {
+          const vResp = await fetch(`/api/vi/delete_video`, {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: vi_mongo_id }), // Use the VI Mongo ID
@@ -68,7 +68,7 @@ const FileDeletionPopup: React.FC<FileDeletionPopupProps> = ({
       // ---------------------------------------------------------
       // 2) Delete Embeddings
       // ---------------------------------------------------------
-      const eResp = await fetch(`http://localhost:5000/api/${collectionName}/deleteembeddings`, {
+      const eResp = await fetch(`/api/${collectionName}/deleteembeddings`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ _id: id, fileName }),
@@ -79,7 +79,7 @@ const FileDeletionPopup: React.FC<FileDeletionPopupProps> = ({
       // 3) Delete Document (Blob + generic Record)
       // ---------------------------------------------------------
       const dResp = await fetch(
-        `http://localhost:5000/api/${collectionName}/${domainName}/deletedocument`,
+        `/api/${collectionName}/${domainName}/deletedocument`,
         {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },

@@ -66,7 +66,7 @@ function DomainContent({ params }: { params: { course: string } }) {
   useEffect(() => {
     if (!username) return;
 
-    fetch(`http://localhost:5000/api/collections/${username}/${collectionName}/domains`)
+    fetch(`/api/collections/${username}/${collectionName}/domains`)
       .then((response) => {
         if (response.status === 403) {
           setAuthorised(false);

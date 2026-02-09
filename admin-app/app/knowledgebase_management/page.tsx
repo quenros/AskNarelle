@@ -70,7 +70,7 @@ function ManageKnowledgeBase(): JSX.Element {
 
   useEffect(() => {
     if (!username) return;
-    fetch(`http://localhost:5000/api/collections/${username}`)
+    fetch(`/api/collections/${username}`)
       .then((response) => {
         if (!response.ok) {
           throw new Error("Failed to fetch collections");

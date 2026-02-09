@@ -1,0 +1,76 @@
+# ==========================================
+# Stage 1: Build Frontend (Next.js)
+# ==========================================
+FROM node:20-bullseye AS frontend-builder
+WORKDIR /app/frontend
+
+# Copy frontend dependency files
+COPY admin-app/package*.json ./
+RUN npm ci
+
+# Copy frontend source and build
+COPY admin-app/. .
+# Ensure the API URL is baked in or handled via runtime env vars if using public runtime config
+# For F1 plan simplicity, baking it in is easiest if you know the URL, 
+# otherwise you need next.config.js 'publicRuntimeConfig'.
+# ARG NEXT_PUBLIC_API_URL
+# ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+RUN npm run build
+
+
+# ==========================================
+# Stage 2: Final Monolithic Image (Python Base)
+# ==========================================
+FROM python:3.12-bullseye
+
+# Install Node.js in the Python image (so we can run the frontend)
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install System Deps for your Python app
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libmagic1 libgl1-mesa-glx libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# --- Setup Backend ---
+COPY flask-server/requirements.txt ./backend/requirements.txt
+RUN pip install --no-cache-dir -r backend/requirements.txt
+COPY flask-server/. ./backend/
+
+# --- Setup Frontend ---
+# Copy built artifacts from Stage 1
+COPY --from=frontend-builder /app/frontend/.next ./frontend/.next
+COPY --from=frontend-builder /app/frontend/public ./frontend/public
+COPY --from=frontend-builder /app/frontend/node_modules ./frontend/node_modules
+COPY --from=frontend-builder /app/frontend/package.json ./frontend/package.json
+COPY --from=frontend-builder /app/frontend/next.config.mjs ./frontend/
+
+# --- Setup Nginx (Optional but Recommended for Single Port) ---
+# If you don't use Nginx, you have to choose ONE port to expose to Azure (80/443).
+# Azure F1 listens on ONE port. You cannot expose 3000 AND 5000 directly to the internet easily.
+# Standard solution: Use a startup script to run both, but only ONE can claim port 80.
+# WE WILL USE A SHELL SCRIPT TO RUN BOTH.
+# Limitation: Next.js runs on 3000, Flask on 5000. 
+# Azure connects to the container on PORT (usually 80 or 8000).
+# You need a Reverse Proxy inside the container (Nginx) or Next.js to proxy calls to Flask.
+# Given Next.js creates a server, we can use Next.js Rewrites to proxy /api to Flask localhost:5000.
+
+# Copy startup script
+COPY start.sh .
+RUN chmod +x start.sh
+
+# Environment variables
+ENV PORT=3000
+ENV FLASK_PORT=5000
+
+# Expose the port Next.js runs on (Azure will route traffic here)
+EXPOSE 3000
+
+# Start both services
+CMD ["./start.sh"]

@@ -19,7 +19,7 @@ const ChartTwo: React.FC = () => {
   useEffect(() => {
     if (!username) return;
 
-    fetch(`http://localhost:5000/chats/queriesByCourse/${username}`)
+    fetch(`/chats/queriesByCourse/${username}`)
     .then(response => {
       if (!response.ok) throw new Error('Failed to fetch data');
       return response.json();

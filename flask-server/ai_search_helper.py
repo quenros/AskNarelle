@@ -15,8 +15,11 @@ from azure.storage.blob import BlobServiceClient
 from langchain.docstore.document import Document
 from common_helper import read_docx, read_pdf, read_pptx, read_txt
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
+import logging
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 blob_service_client = BlobServiceClient.from_connection_string(os.environ.get('AZURE_CONN_STRING'))
 connection_string = os.environ.get('AZURE_CONN_STRING')
@@ -374,63 +377,66 @@ def moveToVectorStoreFunction(containername, domainname, chunksize, overlap, fil
 
 
     
+# ai_search_helper.py
 def createIndexFunction(collection_name):
+    logger.info(f"[INDEX CREATE] Starting creation for: {collection_name}")
+
     try:
-        client = SearchIndexClient(os.environ.get('AZURE_COGNITIVE_SEARCH_ENDPOINT'), AzureKeyCredential(os.environ.get('AZURE_COGNITIVE_SEARCH_API_KEY')))
+        # 1. Initialize Client
+        endpoint = os.environ.get('AZURE_COGNITIVE_SEARCH_ENDPOINT')
+        key = os.environ.get('AZURE_COGNITIVE_SEARCH_API_KEY')
+        
+        # Log the endpoint (masked) to ensure it's loaded correctly
+        logger.debug(f"[INDEX CREATE] Connecting to Endpoint: {endpoint}")
+        if not endpoint or not key:
+            logger.error("[INDEX CREATE] ERROR: Endpoint or API Key is missing in .env")
+            return False, "Missing Environment Variables"
 
-        print(client)
+        client = SearchIndexClient(endpoint=endpoint, credential=AzureKeyCredential(key))
 
+        # 2. Define Index Schema
         fields = [
-        SimpleField(
-            name="id",
-            type=SearchFieldDataType.String,
-            key=True,
-            searchable=True,
-            filterable=True,
-            retrievable=True,
-            stored=True,
-            sortable=False,
-            facetable=False
-        ),
-        SearchableField(
-            name="content",
-            type=SearchFieldDataType.String,
-            searchable=True,
-            filterable=False,
-            retrievable=True,
-            stored=True,
-            sortable=False,
-            facetable=False
-        ),
-        SearchField(
-            name="content_vector", #content_vector
-            type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
-            searchable=True, 
-            vector_search_dimensions=1536, 
-            vector_search_profile_name="my-vector-config"),
-
-        SearchableField(
-            name="filename",
-            type=SearchFieldDataType.String,
-            filterable=True,
-            sortable=True,
-        )
-    ]
+            SimpleField(name="id", type=SearchFieldDataType.String, key=True),
+            SearchableField(name="content", type=SearchFieldDataType.String),
+            SearchField(
+                name="content_vector",
+                type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
+                searchable=True,
+                vector_search_dimensions=1536,
+                vector_search_profile_name="my-vector-config"
+            ),
+            SearchableField(name="filename", type=SearchFieldDataType.String, filterable=True, sortable=True)
+        ]
 
         vector_search = VectorSearch(
             profiles=[VectorSearchProfile(name="my-vector-config", algorithm_configuration_name="my-algorithms-config")],
             algorithms=[HnswAlgorithmConfiguration(name="my-algorithms-config")],
         )
 
-    
         searchindex = SearchIndex(name=collection_name, fields=fields, vector_search=vector_search)
-        result = client.create_or_update_index(index=searchindex)
 
-        return True
+        # 3. Attempt Creation
+        logger.info(f"[INDEX CREATE] Sending request to Azure...")
+        result = client.create_or_update_index(index=searchindex)
+        
+        logger.info(f"[INDEX CREATE] SUCCESS! Index '{collection_name}' is ready.")
+        return True, "Index created successfully"
+
+    except HttpResponseError as e:
+        error_msg = f"Azure Error: {e.status_code} - {e.message}"
+        
+        # If there are detailed validation errors (e.g., wrong vector config), print them:
+        if e.response and e.response.text:
+             logger.error(f"[INDEX CREATE] DETAILED RESPONSE: {e.response.text}")
+        
+        logger.error(f"[INDEX CREATE] {error_msg}")
+        return False, error_msg
 
     except Exception as e:
-        print(f"An error occurred: {e}")
-        return False
+        # This captures Python errors (e.g., DNS issues, code typos)
+        error_msg = f"System Error: {str(e)}"
+        logger.error(f"[INDEX CREATE] {error_msg}", exc_info=True)
+        return False, error_msg
     
 def delete_index_function(collection_name):
     client = SearchIndexClient(os.environ.get('AZURE_COGNITIVE_SEARCH_ENDPOINT'), AzureKeyCredential(os.environ.get('AZURE_COGNITIVE_SEARCH_API_KEY')))

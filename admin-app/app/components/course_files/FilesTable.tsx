@@ -118,7 +118,7 @@ const FilesTable: React.FC<FileTableProps> = ({
         
         const queryParams: Record<string, string> = {
             name: record.name,
-            url: `http://localhost:5000/api/preview/${collectionName}/${domainName}?name=${record.name}`,
+            url: `/api/preview/${collectionName}/${domainName}?name=${record.name}`,
         };
 
         if (record.vi_mongo_id) {
