@@ -256,6 +256,7 @@ def get_documents(username,course_name, domain_name):
     username = username.lower()
     try:
         documents = list(db["courses"].find({"course_name": course_name}))
+        print(documents)
 
         if(len(documents) > 0):
             documents = list(db["courses"].find({"course_name": course_name, "user": username}))

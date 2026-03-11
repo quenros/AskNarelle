@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from azure.core.exceptions import ResourceExistsError
 from azure.core.credentials import AzureNamedKeyCredential
 from typing import List, Dict, Any
+import mimetypes
 
 connection_string = os.environ.get('AZURE_CONN_STRING')
 storage_account_key = os.environ.get('AZURE_STORAGE_KEY')
@@ -91,20 +92,15 @@ def delete_from_azure_blob_storage(containerName, blobName, domainName, versionI
     try:
         # Get a reference to the container
         container_client = blob_service_client.get_container_client(containerName)
-        # blobName_new = 'new/'+blobName
         blobName_domain = f'{domainName}/{blobName}'
 
         # Get a block blob client
         blob_client = container_client.get_blob_client(blobName_domain)
        
-        # blob_client_new = container_client.get_blob_client(blobName_new)
-        # if blob_client_new.exists():
-        #     blob_client_new.delete_blob()
-        # Delete the blob
-        if(isRootBlob == "yes"):
+        if isRootBlob == "yes" or not versionId or ":" in versionId:
             blob_client.delete_blob()
         else:
-            blob_client.delete_blob(version_id = versionId)
+            blob_client.delete_blob(version_id=versionId)
 
         print(f"File deleted successfully")
         return True
@@ -171,13 +167,19 @@ def get_blob_text(container_name: str, blob_name: str) -> str:
 
 def generate_sas_token(container_name, blob_name):
     blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+
+    content_type, _ = mimetypes.guess_type(blob_name)
+
     sas_token = generate_blob_sas(
         account_name=blob_service_client.account_name,
         container_name=container_name,
         blob_name=blob_name,
         account_key=blob_service_client.credential.account_key,
         permission=BlobSasPermissions(read=True),
-        expiry=datetime.utcnow() + timedelta(hours=1)  # Adjust expiry time as needed
+        expiry=datetime.utcnow() + timedelta(hours=1),  # Adjust expiry time as needed
+        content_type=content_type or "application/octet-stream",
+        content_disposition="inline"
     )
+    
     return sas_token
 

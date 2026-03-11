@@ -1,9 +1,12 @@
+import tempfile
+
 from flask import Flask, request, jsonify
 import threading
 from bson import ObjectId
 from datetime import datetime
 import os
 from flask_cors import CORS
+from werkzeug.utils import secure_filename
 from mongo_helper import (
     create_document,
     delete_all_course_documents,
@@ -61,6 +64,8 @@ from video_indexer_helper import (
     delete_all_video_entries_for_course,
     VideoIndexerClient,
     VideoDetails,
+    start_workshop_video_processing, 
+    WORKSHOP_VIDEO_STATUS
 )
 
 from chat_helper import chat_client, ChatRequestBody
@@ -90,8 +95,9 @@ def storeInVectorStore():
     containername = data.get("containername")
     chunksize = int(data.get("chunksize"))
     overlap = int(data.get("overlap"))
+    domainname = data.get("domainname")
 
-    result = storeDocuments(containername, chunksize, overlap)
+    result = storeDocuments(containername, domainname, chunksize, overlap)
 
     if result == "True":
         return jsonify({"message": "Data loaded into vectorstore successfully"}), 201
@@ -1042,7 +1048,8 @@ def delete_video_indexer_entry():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    
+
+#  This is unused as we do not allow users to "select" videos for chatting in the current UI, but we keep it here in case we want to add that feature in the future
 @app.route("/chat/<video_id>", methods=["POST"])
 def chat_with_video(video_id):
     """
@@ -1094,7 +1101,7 @@ def chat_with_course(course_code):
         # 1. Search Documents (Azure AI Search)
         print(f"Searching documents for course: {course_code}...")
         # Use a reasonable threshold (0.65 - 0.7) for ADA-002 models
-        doc_matches = search_documents(course_code, message, top_k=3, score_threshold=1.5)
+        doc_matches = search_documents(course_code, message, top_k=3, score_threshold=8)
         
         # Log the matches found
         print(f"Document matches found: {len(doc_matches)}")
@@ -1156,6 +1163,179 @@ def get_chat_history(course_code):
     except Exception as e:
         print(f"History fetch error: {e}")
         return jsonify({"error": str(e)}), 500
+    
+# For workshop setup to create course and default domain in one go, to avoid confusion for participants when they first use the app
+@app.route("/api/workshop/setup", methods=["POST"])
+def workshop_setup():
+    """
+    Workshop-specific API to ensure a course and default domain exist 
+    before participants attempt to upload videos or documents.
+    """
+    data = request.get_json(silent=True) or {}
+    course_code = (data.get("courseCode") or "").strip()
+    username = (data.get("username") or "workshop-user").strip()
+    domain_name = (data.get("domainName") or "test").strip()
+
+    if not course_code:
+        return jsonify({"error": "courseCode is required"}), 400
+
+    # Format collection name to match your existing logic
+    collection_name = course_code.lower().replace(" ", "-")
+    formatted_domain = domain_name.lower().replace(" ", "-")
+
+    # 1. Check if course exists
+    course_doc = check_if_course_exist(course_code)
+    
+    if not course_doc:
+        print(f"Workshop Setup: Course '{course_code}' does not exist. Creating...")
+        
+        # Create Azure Blob Container
+        createContainer(collection_name)
+        
+        # Register course in Main Database
+        upload_course(collection_name, username)
+        
+        # Register course in Video Indexer Database
+        try:
+            vi_add_course(
+                course_code=course_code,
+                course_name=f"Workshop {course_code}",
+                description="Auto-generated for workshop",
+                owner_username=username,
+            )
+        except Exception as e:
+            # Catching gracefully in case of unexpected duplicate race conditions
+            print(f"Workshop Setup: VI add course warning: {e}")
+            
+    # 2. Ensure the default domain exists
+    try:
+        # upload_domain handles creating the domain in the DB
+        upload_domain_success, message = upload_domain(formatted_domain, collection_name)
+        if not upload_domain_success and "already exist" not in str(message).lower():
+             print(f"Workshop Setup: Domain creation issue: {message}")
+    except Exception as e:
+        print(f"Workshop Setup: Domain creation error: {e}")
+
+    return jsonify({
+        "message": "Workshop setup complete. Course and domain are ready.",
+        "courseCode": course_code,
+        "collectionName": collection_name,
+        "domainName": formatted_domain
+    }), 200
+
+# ============================================
+# WORKSHOP MICROSERVICE ENDPOINT
+# ============================================
+
+@app.route("/api/processdocument", methods=["POST"])
+def process_document_microservice():
+    """
+    Stateless endpoint for Workshop Attendees.
+    Receives pre-retrieved document context and a question, 
+    returns the LLM generated answer via Azure OpenAI.
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({"error": "Invalid JSON payload"}), 400
+            
+        question = data.get("question")
+        documents_context = data.get("documents")
+        
+        if not question or not documents_context:
+            return jsonify({"error": "Missing 'question' or 'documents' in payload"}), 400
+
+        # Feed the raw data to the new ChatHelper method
+        answer = chat_client.generate_answer_from_raw_context(
+            message=question, 
+            raw_context=documents_context
+        )
+        
+        return jsonify({"answer": answer}), 200
+
+    except Exception as e:
+        app.logger.error(f"Microservice processdocument error: {str(e)}")
+        return jsonify({"error": "Failed to process document context", "details": str(e)}), 500
+
+# ============================================
+# WORKSHOP VIDEO UPLOAD & POLLING ENDPOINTS
+# ============================================
+
+@app.route("/api/workshop/video/upload", methods=["POST"])
+def workshop_video_upload():
+    """
+    Receives a video, tags it with the session ID, saves it temporarily, 
+    and kicks off the background Video Indexer thread.
+    """
+    try:
+        if 'video' not in request.files:
+            return jsonify({"error": "No video file provided"}), 400
+            
+        video_file = request.files['video']
+        session_id = request.form.get('session_id', 'unknown')
+        
+        if video_file.filename == '':
+            return jsonify({"error": "Empty filename"}), 400
+
+        # 1. Clean filename and inject session ID
+        # Example: SC1007-2min.mp4 -> SC1007-2min-237.mp4
+        original_name = secure_filename(video_file.filename)
+        name_part, ext_part = os.path.splitext(original_name)
+        
+        tagged_filename = f"{name_part}-{session_id}{ext_part}"
+        tagged_video_name = f"{name_part}-{session_id}"
+        
+        # 2. Save temporarily using the OS temp directory
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, tagged_filename)
+        video_file.save(temp_path)
+        
+        # 3. Hand off to the background thread in video_indexer_helper
+        start_workshop_video_processing(temp_path, tagged_video_name)
+        
+        # 4. Return immediately so the frontend can start polling
+        return jsonify({
+            "message": "Video accepted. Processing started.",
+            "tagged_name": tagged_video_name
+        }), 202
+
+    except Exception as e:
+        app.logger.error(f"Workshop upload failed: {str(e)}")
+        return jsonify({"error": "Failed to initiate video upload", "details": str(e)}), 500
+
+
+@app.route("/api/workshop/video/status/<tagged_name>", methods=["GET"])
+def workshop_video_status(tagged_name):
+    """
+    Frontend polls this endpoint every few seconds to check the processing status.
+    Returns the cleaned transcript once it hits the 'Completed' status.
+    """
+    try:
+        # Check our in-memory dictionary for the video's status
+        video_data = WORKSHOP_VIDEO_STATUS.get(tagged_name)
+        
+        if not video_data:
+            return jsonify({"error": "Video not found or processing hasn't started yet"}), 404
+            
+        current_status = video_data.get("status")
+        transcript = video_data.get("transcript")
+        
+        # If it is done, we send the transcript back to the frontend
+        if current_status == "Completed":
+            return jsonify({
+                "status": current_status,
+                "transcript": transcript
+            }), 200
+            
+        # If it is still processing, just send the status message
+        return jsonify({
+            "status": current_status
+        }), 200
+        
+    except Exception as e:
+        app.logger.error(f"Status check failed for {tagged_name}: {str(e)}")
+        return jsonify({"error": "Failed to check status"}), 500
 
 if __name__ == "__main__":
     app.run(debug=True)

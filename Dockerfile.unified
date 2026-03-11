@@ -51,16 +51,7 @@ COPY --from=frontend-builder /app/frontend/node_modules ./frontend/node_modules
 COPY --from=frontend-builder /app/frontend/package.json ./frontend/package.json
 COPY --from=frontend-builder /app/frontend/next.config.mjs ./frontend/
 
-# --- Setup Nginx (Optional but Recommended for Single Port) ---
-# If you don't use Nginx, you have to choose ONE port to expose to Azure (80/443).
-# Azure F1 listens on ONE port. You cannot expose 3000 AND 5000 directly to the internet easily.
-# Standard solution: Use a startup script to run both, but only ONE can claim port 80.
-# WE WILL USE A SHELL SCRIPT TO RUN BOTH.
-# Limitation: Next.js runs on 3000, Flask on 5000. 
-# Azure connects to the container on PORT (usually 80 or 8000).
-# You need a Reverse Proxy inside the container (Nginx) or Next.js to proxy calls to Flask.
-# Given Next.js creates a server, we can use Next.js Rewrites to proxy /api to Flask localhost:5000.
-
+# --- Setup Nginx ---
 # Copy startup script
 COPY start.sh .
 RUN chmod +x start.sh

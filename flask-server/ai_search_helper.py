@@ -1,7 +1,7 @@
 import os
 from flask import jsonify
 from langchain_openai import AzureOpenAIEmbeddings
-from langchain_community.document_loaders import AzureBlobStorageContainerLoader
+# from langchain_community.document_loaders import AzureBlobStorageContainerLoader
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 from azure.search.documents.indexes import SearchIndexClient
@@ -123,7 +123,7 @@ def ensure_index(index_name: str, endpoint: str, key: str, vector_dim: int):
     index = SearchIndex(name=index_name, fields=fields, vector_search=vector_search)
     index_client.create_or_update_index(index=index)
 
-def storeDocuments(containername, chunksize, overlap):
+def storeDocuments(containername, domainname, chunksize, overlap):
     try:
         endpoint = os.environ.get('AZURE_COGNITIVE_SEARCH_ENDPOINT')
         key = os.environ.get('AZURE_COGNITIVE_SEARCH_API_KEY')
@@ -133,13 +133,41 @@ def storeDocuments(containername, chunksize, overlap):
 
         search_client = SearchClient(endpoint=endpoint, index_name=containername, credential=AzureKeyCredential(key))
 
-        loader = AzureBlobStorageContainerLoader(
-            conn_str=os.environ.get('AZURE_CONN_STRING'),
-            container=containername,
-            prefix='new/'
-        )
+        # --- NEW ROBUST DOCUMENT LOADING LOGIC ---
+        file_readers = {
+            '.pdf': read_pdf,
+            '.docx': read_docx,
+            '.pptx': read_pptx,
+            '.txt': read_txt
+        }
+        
+        container_client = blob_service_client.get_container_client(containername)
+        
+        # Fetch only blobs inside this specific domain
+        blob_list = container_client.list_blobs(name_starts_with=f"{domainname}/")
+        
+        documents = []
+        for blob in blob_list:
+            ext = Path(blob.name).suffix.lower()
+            
+            # Only process files we have a reader for (skips videos automatically)
+            if ext in file_readers:
+                try:
+                    blob_client = container_client.get_blob_client(blob)
+                    blob_content = blob_client.download_blob().readall()
+                    
+                    # Read content using your existing common_helper functions!
+                    page_content = file_readers[ext](blob_content)
+                    
+                    # Wrap in LangChain Document
+                    documents.append(Document(page_content=page_content, metadata={"source": blob.name}))
+                except Exception as e:
+                    print(f"Failed to read {blob.name}: {e}")
+            else:
+                print(f"Skipping {blob.name} (unsupported format)")
+
         text_splitter = CharacterTextSplitter(chunk_size=chunksize, chunk_overlap=overlap)
-        documents = loader.load()
+        # documents = loader.load()
 
         docs_to_add_final, docs_to_update_final, docs_to_delete_final = [], [], []
 
@@ -468,7 +496,7 @@ def delete_embeddings_function(blobName, collection_name):
         return False
 
 
-def search_documents(collection_name, query, top_k=3, score_threshold=5):
+def search_documents(collection_name, query, top_k=3, score_threshold=8):
     """
     Performs a Keyword-Only search (BM25) on Azure AI Search.
     Useful for finding specific terms or filenames.

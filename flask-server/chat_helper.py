@@ -121,9 +121,9 @@ def seconds_to_timestamp(seconds):
 # --------------------------------------------------------------------------
 # 3. Prompts (Inlined for self-containment)
 # --------------------------------------------------------------------------
-def get_prompt_template():
+def get_video_prompt_template():
     return """
-    You are an AI assistant that answers questions based on detailed context. The context may include video transcripts or document excerpts.
+    You are an AI assistant that answers questions based on detailed context from video transcripts.
     
     **Instructions:**
     
@@ -131,9 +131,8 @@ def get_prompt_template():
        - Carefully read the user's query to determine what information they are seeking.
     
     2. **Use Relevant Context:**
-       - Search through the provided context to find information that directly answers the question.
-       - If the context comes from a video (contains timestamps like [mm:ss]), you may reference the timestamp if relevant.
-       - If the context is from a document, simply cite the information source (e.g., "According to [Filename]...").
+       - Search through the provided video transcript context to find information that directly answers the question.
+       - Reference timestamps (e.g., [mm:ss]) where relevant to help the user locate the information in the video.
     
     3. **Compose a Clear and Concise Answer:**
        - Provide the information in a straightforward manner.
@@ -143,7 +142,7 @@ def get_prompt_template():
     
     4. **Formatting Guidelines:**
        - Begin your answer by addressing the user's question.
-       - State the source (Video Title or Document Name) in your answer. Be specific where you got the context from.
+       - State the Video Title in your answer. Be specific where you got the context from.
        
     **History:**
     
@@ -197,50 +196,6 @@ def get_document_prompt_template():
     **Your Answer:**
     """
 
-def get_prompt_temporal_question():
-    return """You are an assistant that specializes in analyzing questions about course materials (videos and documents).
-
-    Given a user question, determine whether it is **temporal**, meaning it refers to a specific point or time in a **video** (e.g., 'at 0:5:00', 'before the end', 'around 20 minutes in').
-
-    ### Instructions:
-    1. First, check if the question refers to a specific time.
-    2. If it refers to a document (e.g., "in the pdf", "on page 5"), it is **NOT** temporal in the context of video playback.
-    3. If YES (video time), extract the timestamp mentioned in the question (e.g., 0:05:00, 1:27:30).
-    4. If NO, return "not a temporal question".
-
-    ### Format your response strictly as:
-    {{
-    "is_temporal": true or false,
-    "timestamp": "H:MM:SS" or "None"
-    }}
-
-    ### Example 1:
-    Question: "What was discussed at the 27-minute mark of the lecture?"
-    Response:
-    {{
-    "is_temporal": true,
-    "timestamp": "0:27:00"
-    }}
-
-    ### Example 2:
-    Question: "What does the syllabus pdf say about grading?"
-    Response:
-    {{
-    "is_temporal": false,
-    "timestamp": "None"
-    }}
-
-    ### Example 3:
-    Question: "What are the learning outcomes of this course?"
-    Response:
-    {{
-    "is_temporal": false,
-    "timestamp": "None"
-    }}
-
-    ### Now process this question:
-    Question: "{question}"
-    """
 
 def get_prompt_preQrag_temporal():
     return """
@@ -288,51 +243,6 @@ def get_prompt_preQrag_temporal():
     
     """
 
-def get_prompt_preQrag():
-    return """
-    SYSTEM ROLE:
-    You are a lightweight PRE-QRAG router and question rewriter for a lecture-video RAG system.
-
-    INPUTS:
-    - user_query = {user_query}
-    - video_map  = {video_map}   # array of {{"name": "...", "video_id": "..."}}
-
-    STEP 1 — CLASSIFY
-    Routing_type:
-    - "SINGLE_DOC": answerable from one specific lecture.
-    - "MULTI_DOC": needs ≥2 lectures. If unsure OR no lecture explicitly mentioned, choose "MULTI_DOC".
-
-    STEP 2 — MAP LECTURES TO video_id(s)
-    Resolve case-insensitive names/aliases (and "lecture N" -> Nth entry in video_map) to video_id(s).
-    - If no lecture explicitly named → set top-level video_ids to **all** IDs in video_map (order-preserving).
-    - SINGLE_DOC → exactly 1 id. MULTI_DOC → ≥1 ids (deduped, order-preserving).
-
-    STEP 3 — QUESTION REWRITING
-    - SINGLE_DOC: produce **exactly 2** variants:
-    1) Dense-optimized (semantic).  2) Sparse-optimized (keyword-heavy).
-    Each variant's "video_ids" = [that single mapped id].
-    - MULTI_DOC: produce **exactly 2** decomposed into distinct sub-questions.
-    Each sub-question should target a distinct aspect of the query, not duplicates.
-    Each variant's "video_ids" = all related ids; if none specified, use **top-level video_ids** (i.e., all videos).  
-
-    CONSTRAINTS
-    - Do **not** invent facts or lecture names. Queries must stay grounded in the original question.
-    - "video_ids" must be valid IDs from video_map.
-    - Top-level "video_ids" must equal the union (deduped, order-preserving) of all IDs appearing in query_variants[*].video_ids.
-    - Return **valid JSON only** (no comments/markdown/trailing commas).
-
-    STRICT OUTPUT (return ONLY this JSON object):
-    {{
-    "routing_type": "SINGLE_DOC" | "MULTI_DOC",
-    "user_query": "{user_query}",
-    "video_ids": ["..."],
-    "query_variants": [
-        {{ "video_ids": ["..."], "question": "..." }},
-        {{ "video_ids": ["..."], "question": "..." }}
-    ]
-    }}
-    
-    """
 
 # --------------------------------------------------------------------------
 # 4. Chat Helper Class (Service + Repository merged)
@@ -416,7 +326,7 @@ class ChatHelper:
             logger.error(f"Ingest failed: {e}")
             return False
 
-    # --- New Helper: Generate Answer from Raw Context List ---
+    # --- Generate Answer from Raw Context List ---
     def generate_answer_from_docs(self, context_list: List[str], message: str, previous_messages: list = None, 
                                   course_code: str = "", user_id: str = ""):
             """
@@ -490,7 +400,7 @@ class ChatHelper:
             
         return []
 
-    # Helper for string format (unused for generation now, but good to keep)
+    # Helper for string format
     def get_conversation_history_str(self, user_id: str, course_code: str, limit: int = 6) -> str:
         msgs = self.get_conversation_history(user_id, course_code)
         # Take last N messages
@@ -870,7 +780,7 @@ class ChatHelper:
 
 
         prompt = PromptTemplate(
-            template=get_prompt_template(),
+            template=get_video_prompt_template(),
             input_variables=["context", "input", "history"]
         )
 
@@ -891,5 +801,42 @@ class ChatHelper:
         except Exception as e:
             logger.error(f"Generation error: {e}")
             return "Error generating response."
+
+
+# --- Microservice Logic for Workshop ---
+    
+    def generate_answer_from_raw_context(self, message: str, raw_context: str) -> str:
+        """
+        Stateless microservice endpoint logic: 
+        Takes pre-retrieved raw context from the workshop apps and generates an LLM answer.
+        """
+        if not raw_context:
+            return "No context was provided to generate an answer."
+
+        logger.info("Processing microservice generation request from workshop attendee.")
+
+        # Package the raw string context into a LangChain Document format
+        docs = [Document(page_content=raw_context)]
+
+        prompt = PromptTemplate(
+            template=get_document_prompt_template(),
+            input_variables=["context", "input", "history"]
+        )
+
+        chain = create_stuff_documents_chain(self.chat_model, prompt)
+        
+        try:
+            # We pass an empty string for history to keep this endpoint completely stateless
+            answer = chain.invoke({
+                "context": docs,
+                "input": message,
+                "history": ""
+            })
+            
+            return answer
+            
+        except Exception as e:
+            logger.error(f"Raw Context Generation error: {e}")
+            return "Error generating response from the provided documents."
 
 chat_client = ChatHelper()

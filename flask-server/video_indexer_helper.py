@@ -727,35 +727,120 @@ def index_video_and_update_metadata(
         logger.exception(f"Error processing video {video_object_id}")
         change_video_status(video_object_id, Status.ERROR)
         raise e
+    
 
-def send_success_email(recipient_email: str, video_name: str, course_code: str):
-    # (Keep existing email logic)
-    sender_email = os.environ.get("MAIL_USERNAME")
-    sender_password = os.environ.get("MAIL_PASSWORD")
-    smtp_server = os.environ.get("MAIL_SERVER","smtp.office365.com")
-    smtp_port = 587
+# ============================================
+# 6. WORKSHOP MICROSERVICE LOGIC (STATELESS)
+# ============================================
 
-    if not recipient_email or "@" not in recipient_email: return
-    if not sender_email or not sender_password: return
+# In-memory dictionary to track workshop video statuses without hitting MongoDB
+WORKSHOP_VIDEO_STATUS = {}
 
-    subject = f"Processing Complete: {video_name}"
-    body = f"""<html><body>
-        <h3 style="color: #2C3463;">Video Indexing Complete</h3>
-        <p>Your video <b>{video_name}</b> has been processed for <b>{course_code}</b>.</p>
-        <p>You can now search and chat with this video.</p>
-        </body></html>"""
+def start_workshop_video_processing(video_path: str, tagged_name: str):
+    """
+    Kicks off the background thread for workshop video processing.
+    """
+    # Initialize the status
+    WORKSHOP_VIDEO_STATUS[tagged_name] = {
+        "status": "Initializing...", 
+        "transcript": None
+    }
+    
+    t = threading.Thread(
+        target=_process_workshop_video_task,
+        args=(video_path, tagged_name)
+    )
+    t.start()
 
-    msg = MIMEMultipart()
-    msg['From'] = sender_email
-    msg['To'] = recipient_email
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'html'))
-
+def _process_workshop_video_task(video_path: str, tagged_name: str):
+    """
+    The background worker that uploads, waits, extracts, and cleans the transcript.
+    """
     try:
-        server = smtplib.SMTP(smtp_server, smtp_port)
-        server.starttls()
-        server.login(sender_email, sender_password)
-        server.sendmail(sender_email, recipient_email, msg.as_string())
-        server.quit()
+        vi_client = VideoIndexerClient()
+        
+        # 1. Read file into a BytesIO buffer for the VI Client
+        WORKSHOP_VIDEO_STATUS[tagged_name]["status"] = "Uploading to Azure Video Indexer..."
+        with open(video_path, "rb") as f:
+            media = io.BytesIO(f.read())
+        
+        # 2. Upload to VI
+        vi_video_id = vi_client.file_upload_async(
+            media=media, 
+            video_name=tagged_name, 
+            privacy="Private"
+        )
+        
+        # 3. Wait for indexing
+        WORKSHOP_VIDEO_STATUS[tagged_name]["status"] = "Indexing video (this takes a few minutes)..."
+        insights = vi_client.wait_for_index_async(vi_video_id)
+        
+        # 4. Extract raw transcript from the nested JSON
+        WORKSHOP_VIDEO_STATUS[tagged_name]["status"] = "Extracting raw transcript..."
+        raw_transcript = ""
+        videos = insights.get("videos", [])
+        if videos:
+            transcript_blocks = videos[0].get("insights", {}).get("transcript", [])
+            raw_transcript = " ".join([block.get("text", "") for block in transcript_blocks])
+        
+        if not raw_transcript.strip():
+            WORKSHOP_VIDEO_STATUS[tagged_name]["status"] = "Completed"
+            WORKSHOP_VIDEO_STATUS[tagged_name]["transcript"] = "No speech detected in the video."
+            return
+
+        # 5. Clean Transcript using LLM
+        WORKSHOP_VIDEO_STATUS[tagged_name]["status"] = "Cleaning transcript with AI..."
+        clean_transcript = clean_workshop_transcript(raw_transcript)
+        
+        # 6. Mark Completed
+        WORKSHOP_VIDEO_STATUS[tagged_name]["status"] = "Completed"
+        WORKSHOP_VIDEO_STATUS[tagged_name]["transcript"] = clean_transcript
+        
+        # 7. Auto-Cleanup: Delete the video from Azure VI to save host costs
+        try:
+            vi_client.delete_video(vi_video_id)
+            logger.info(f"Auto-cleaned Azure VI video {vi_video_id} for workshop.")
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to auto-delete VI video {vi_video_id}: {cleanup_error}")
+
     except Exception as e:
-        logger.error(f"Failed to send email: {e}")
+        logger.error(f"Workshop video pipeline failed for {tagged_name}: {e}")
+        WORKSHOP_VIDEO_STATUS[tagged_name]["status"] = f"Error: {str(e)}"
+        
+    finally:
+        # Always delete the temporary MP4 file from the server's hard drive
+        if os.path.exists(video_path):
+            os.remove(video_path)
+
+def clean_workshop_transcript(raw_text: str) -> str:
+    """
+    Stateless LangChain call to clean the raw transcript.
+    """
+    try:
+        chat_model = AzureChatOpenAI(
+            azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
+            api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
+            api_version=os.environ.get("OPENAI_API_VERSION", "2023-05-15"),
+            azure_deployment=os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o"),
+            temperature=0.2
+        )
+        
+        prompt = PromptTemplate(
+            template=(
+                "You are an AI assistant. Clean the following raw video transcript. "
+                "Fix punctuation, grammar, and remove filler words (um, uh). "
+                "Output ONLY the clean text.\n\nRaw Transcript:\n{text}"
+            ),
+            input_variables=["text"]
+        )
+        
+        chain = prompt | chat_model
+        result = chain.invoke({"text": raw_text})
+        
+        # result.content handles the extraction of the text from the AIMessage object
+        return result.content if hasattr(result, 'content') else str(result)
+        
+    except Exception as e:
+        logger.error(f"Transcript cleaning failed: {e}")
+        # Fallback to the raw text if the LLM drops the request
+        return raw_text

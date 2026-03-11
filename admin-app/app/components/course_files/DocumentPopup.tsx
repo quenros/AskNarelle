@@ -150,6 +150,7 @@ const DocumentPopup: React.FC<PopupProps> = ({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             containername: collectionName,
+            domainname: domainName,
             chunksize: 1000,
             overlap: 100, 
           }),
@@ -220,8 +221,8 @@ const DocumentPopup: React.FC<PopupProps> = ({
         />
 
         <Dragger
-          multiple={false} 
-          maxCount={1} 
+          multiple={true} 
+          maxCount={5} 
           fileList={fileList}
           onChange={({ fileList }) => setFileList(fileList)}
           beforeUpload={beforeUpload}
