@@ -97,7 +97,7 @@ class TranscriptHelper:
         self.api_key = os.environ.get("AZURE_OPENAI_API_KEY")
         self.api_version = os.environ.get("OPENAI_API_VERSION")
         self.deployment_name = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME")
-        self.embedding_model = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
+        self.embedding_model = os.environ.get("EMBEDDING_MODEL", "text-embedding-ada-002")
 
         self.chat_model = AzureChatOpenAI(
             azure_endpoint=self.azure_endpoint,

@@ -57,7 +57,7 @@ class VIConsts:
         self.ApiVersion = os.environ.get("VIDEO_INDEXER_API_VERSION", "2022-08-01")
         self.ApiEndpoint = os.environ.get("API_ENDPOINT")
         self.AzureResourceManager = "https://management.azure.com"
-        self.Location = os.environ.get("VIDEO_INDEXER_LOCATION", "trial")
+        self.Location = os.environ.get("VIDEO_INDEXER_LOCATION", "eastasia")
 
         self.AZURE_TENANT_ID = os.environ.get("AZURE_TENANT_ID")
         self.AZURE_CLIENT_ID = os.environ.get("AZURE_CLIENT_ID")
@@ -462,7 +462,7 @@ class VideoIndexerClient:
                 raise RuntimeError("Authentication Failed: No Access Token available.")
 
         self.get_account_async() 
-        loc = self.account["location"]
+        loc = self.consts.Location
         acc_id = self.account["properties"]["accountId"]
 
         url = f"{self.consts.ApiEndpoint}/{loc}/Accounts/{acc_id}/Videos"
@@ -493,7 +493,7 @@ class VideoIndexerClient:
 
     def wait_for_index_async(self, video_id: str, timeout_sec: int = 2000) -> Dict:
         self.get_account_async()
-        loc = self.account["location"]
+        loc = self.consts.Location
         acc_id = self.account["properties"]["accountId"]
         
         url = f"{self.consts.ApiEndpoint}/{loc}/Accounts/{acc_id}/Videos/{video_id}/Index"
@@ -521,7 +521,7 @@ class VideoIndexerClient:
         self.get_account_async()
         vid_token = self._get_account_access_token(scope="Account", video_id=video_id)
         
-        loc = self.account["location"]
+        loc = self.consts.Location
         acc_id = self.account["properties"]["accountId"]
         
         url = (
@@ -540,7 +540,7 @@ class VideoIndexerClient:
         (POST request)
         """
         self.get_account_async()
-        loc = self.account["location"]
+        loc = self.consts.Location
         acc_id = self.account["properties"]["accountId"]
 
         url = f'{self.consts.ApiEndpoint}/{loc}/Accounts/{acc_id}/Videos/{video_id}/PromptContent'
@@ -556,7 +556,7 @@ class VideoIndexerClient:
         Get the prompt content for the video (GET request).
         """
         self.get_account_async()
-        loc = self.account["location"]
+        loc = self.consts.Location
         acc_id = self.account["properties"]["accountId"]
 
         url = f'{self.consts.ApiEndpoint}/{loc}/Accounts/{acc_id}/Videos/{video_id}/PromptContent'
@@ -608,7 +608,7 @@ class VideoIndexerClient:
 
     def delete_video(self, video_id: str):
         self.get_account_async()
-        loc = self.account["location"]
+        loc = self.consts.Location
         acc_id = self.account["properties"]["accountId"]
         
         url = f"{self.consts.ApiEndpoint}/{loc}/Accounts/{acc_id}/Videos/{video_id}"

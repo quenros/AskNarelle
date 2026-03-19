@@ -261,7 +261,7 @@ class ChatHelper:
         self.api_key = os.environ.get("AZURE_OPENAI_API_KEY")
         self.api_version = os.environ.get("OPENAI_API_VERSION", "2023-05-15")
         self.deployment_name = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o")
-        self.embedding_model = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
+        self.embedding_model = os.environ.get("EMBEDDING_MODEL", "text-embedding-ada-002")
 
         # Clients
         self.mongo_client = MongoClient(self.mongo_uri)
