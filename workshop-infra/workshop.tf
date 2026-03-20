@@ -79,11 +79,9 @@ resource "azurerm_linux_web_app" "app" {
 
   site_config {
     application_stack {
-      # FIX: Tell Azure to use your Docker image instead of raw Python
       docker_image_name   = "unified:latest"
       docker_registry_url = "https://${azurerm_container_registry.acr.login_server}"
     }
-    
     container_registry_use_managed_identity = true
   }
 
@@ -92,12 +90,9 @@ resource "azurerm_linux_web_app" "app" {
   }
 
   app_settings = {
-    # Helps Docker containers run smoother on App Service
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false" 
     
-    # NOTE: If your Docker app listens on a specific port (like 5000 or 8000), 
-    # remove the '#' below and update the number so Azure knows where to route traffic!
-    # "WEBSITES_PORT" = "8000" 
+    "DOCKER_ENABLE_CI" = "true"
   }
 }
 
