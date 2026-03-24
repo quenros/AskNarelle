@@ -15,7 +15,7 @@ import ChartOne from "./components/dashboard/ChartOne";
 import ChartTwo from "./components/dashboard/ChartTwo";
 import ChartThree from "./components/dashboard/ChartThree";
 import ChartFour from "./components/dashboard/ChartFour";
-import { msalConfig } from "../authConfig";
+import { msalConfig, AUTH_DISABLED, DEFAULT_USERNAME } from "../authConfig";
 import { PublicClientApplication } from "@azure/msal-browser";
 import Image from "next/image";
 
@@ -46,6 +46,10 @@ export default function Home() {
   const [greeting, setGreeting] = useState<string>("");
 
   useEffect(() => {
+    if (AUTH_DISABLED) {
+      setUsername(DEFAULT_USERNAME);
+      return;
+    }
     if (isAuthenticated) {
       const accounts = msalInstance.getAllAccounts();
       if (accounts.length > 0) {
@@ -90,129 +94,120 @@ export default function Home() {
     [totalUsers, totalQueries]
   );
 
-  return (
-    <div>
-      <AuthenticatedTemplate>
-        {/* Top spacer since your header is fixed ~8vh */}
-        <div style={{ marginTop: "8vh", padding: "24px" }}>
-          <Card bordered style={{ marginBottom: 16 }}>
-            <Space direction="vertical" size={4}>
-              <Title level={3} style={{ margin: 0 }}>
-                {greeting}
-              </Title>
-              <Text type="secondary">Dashboard Homepage</Text>
-            </Space>
-          </Card>
+  const dashboardContent = (
+    <div style={{ marginTop: "8vh", padding: "24px" }}>
+      <Card bordered style={{ marginBottom: 16 }}>
+        <Space direction="vertical" size={4}>
+          <Title level={3} style={{ margin: 0 }}>
+            {greeting}
+          </Title>
+          <Text type="secondary">Dashboard Homepage</Text>
+        </Space>
+      </Card>
 
-          {/* KPI Row */}
-          <Row gutter={[16, 16]}>
+      {/* KPI Row */}
+      <Row gutter={[16, 16]}>
+        <Col xs={24} md={12}>
+          <Card>
+            {loading ? (
+              <Skeleton active paragraph={false} />
+            ) : (
+              <Space
+                align="center"
+                size="large"
+                style={{ width: "100%", justifyContent: "space-between" }}
+              >
+                <Statistic
+                  title="Total Users"
+                  value={totalUsers}
+                  valueStyle={{ color: "#2C3463" }}
+                />
+                <div
+                  style={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: 12,
+                    background: "#f5f5f5",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <IoPeople size={28} color="#2C3463" />
+                </div>
+              </Space>
+            )}
+          </Card>
+        </Col>
+        <Col xs={24} md={12}>
+          <Card>
+            {loading ? (
+              <Skeleton active paragraph={false} />
+            ) : (
+              <Space
+                align="center"
+                size="large"
+                style={{ width: "100%", justifyContent: "space-between" }}
+              >
+                <Statistic
+                  title="Total Queries"
+                  value={totalQueries}
+                  valueStyle={{ color: "#2C3463" }}
+                />
+                <div
+                  style={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: 12,
+                    background: "#f5f5f5",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <BsQuestionCircle size={28} color="#2C3463" />
+                </div>
+              </Space>
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Charts / Empty State */}
+      {!loading && totalUsers === 0 ? (
+        <Card style={{ marginTop: 16 }}>
+          <Result
+            status="info"
+            title="No usage yet"
+            subTitle="Once users start interacting, you’ll see charts and trends here."
+          />
+        </Card>
+      ) : (
+        <>
+          <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
             <Col xs={24} md={12}>
-              <Card>
-                {loading ? (
-                  <Skeleton active paragraph={false} />
-                ) : (
-                  <Space
-                    align="center"
-                    size="large"
-                    style={{ width: "100%", justifyContent: "space-between" }}
-                  >
-                    <Statistic
-                      title="Total Users"
-                      value={totalUsers}
-                      valueStyle={{ color: "#2C3463" }}
-                    />
-                    <div
-                      style={{
-                        width: 56,
-                        height: 56,
-                        borderRadius: 12,
-                        background: "#f5f5f5",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <IoPeople size={28} color="#2C3463" />
-                    </div>
-                  </Space>
-                )}
+              <Card title="Usage Over Time">
+                <ChartOne />
               </Card>
             </Col>
             <Col xs={24} md={12}>
-              <Card>
-                {loading ? (
-                  <Skeleton active paragraph={false} />
-                ) : (
-                  <Space
-                    align="center"
-                    size="large"
-                    style={{ width: "100%", justifyContent: "space-between" }}
-                  >
-                    <Statistic
-                      title="Total Queries"
-                      value={totalQueries}
-                      valueStyle={{ color: "#2C3463" }}
-                    />
-                    <div
-                      style={{
-                        width: 56,
-                        height: 56,
-                        borderRadius: 12,
-                        background: "#f5f5f5",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <BsQuestionCircle size={28} color="#2C3463" />
-                    </div>
-                  </Space>
-                )}
+              <Card title="Top Categories">
+                <ChartTwo />
               </Card>
             </Col>
           </Row>
+        </>
+      )}
+    </div>
+  );
 
-          {/* Charts / Empty State */}
-          {!loading && totalUsers === 0 ? (
-            <Card style={{ marginTop: 16 }}>
-              <Result
-                status="info"
-                title="No usage yet"
-                subTitle="Once users start interacting, you’ll see charts and trends here."
-              />
-            </Card>
-          ) : (
-            <>
-              <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-                <Col xs={24} md={12}>
-                  <Card title="Usage Over Time">
-                    {/* Keep your chart component intact */}
-                    <ChartOne />
-                  </Card>
-                </Col>
-                <Col xs={24} md={12}>
-                  <Card title="Top Categories">
-                    <ChartTwo />
-                  </Card>
-                </Col>
-              </Row>
+  if (AUTH_DISABLED) {
+    return <div>{dashboardContent}</div>;
+  }
 
-              {/* <Row gutter={[16, 16]} style={{ marginTop: 16, marginBottom: 16 }}>
-                <Col xs={24} md={12}>
-                  <Card title="Active Users">
-                    <ChartThree />
-                  </Card>
-                </Col>
-                <Col xs={24} md={12}>
-                  <Card title="Query Breakdown">
-                    <ChartFour />
-                  </Card>
-                </Col>
-              </Row> */}
-            </>
-          )}
-        </div>
-      </AuthenticatedTemplate>
+  return (
+    <div>
+      <AuthenticatedTemplate>{dashboardContent}</AuthenticatedTemplate>
 
       <UnauthenticatedTemplate>
         {/* Login view */}
@@ -227,7 +222,6 @@ export default function Home() {
             gap: 24,
           }}
         >
-          <div style={{ display: "none" }} className="sm:block" />
           <Row gutter={[24, 24]} style={{ width: "100%" }}>
             <Col xs={24} md={14}>
               <div style={{ position: "relative", width: "100%", height: "60vh" }}>
