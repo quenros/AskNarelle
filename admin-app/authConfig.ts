@@ -1,10 +1,5 @@
 import { LogLevel } from "@azure/msal-browser";
 
-// Set to true to bypass MSAL login — any user can access the app without signing in.
-// Set DEFAULT_USERNAME to your admin account email used in API calls (e.g. "admin@yourdomain.com").
-export const AUTH_DISABLED = true;
-export const DEFAULT_USERNAME = "admin";
-
 export const msalConfig = {
     auth: {
         clientId: "e0a0692d-739b-46b0-bc9e-3561f3d44800",

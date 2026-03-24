@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from "react";
 import SignOutButton from "./authentication/SignOutButton";
 import { PublicClientApplication } from "@azure/msal-browser";
-import { msalConfig, AUTH_DISABLED } from "@/authConfig";
+import { msalConfig } from "@/authConfig";
 import { AuthenticatedTemplate, UnauthenticatedTemplate } from "@azure/msal-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -56,71 +56,66 @@ const Navigation: React.FC = () => {
     },
   ];
 
-  const fullNav = (
-    <>
-      <Header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          paddingInline: 16,
-          background: "#fff",
-          borderBottom: "1px solid #f0f0f0",
-          boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
-        }}
-      >
-        <Link href="/" style={{ textDecoration: "none" }}>
-          <Text strong style={{ color: "#2C3463", fontSize: 20, marginRight: 16 }}>
-            AskNarelle
-          </Text>
-        </Link>
-
-        {screens.md ? (
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
-            <Menu
-              mode="horizontal"
-              selectedKeys={[selectedKey]}
-              items={items}
-              style={{ borderBottom: "none" }}
-            />
-            <SignOutButton />
-          </div>
-        ) : (
-          <Button
-            type="text"
-            icon={<MenuOutlined style={{ fontSize: 20, color: "#2C3463" }} />}
-            onClick={() => setMenuOpen(true)}
-            style={{ marginLeft: "auto" }}
-          />
-        )}
-      </Header>
-
-      <Drawer
-        title={<Text strong style={{ color: "#2C3463", fontSize: 18 }}>AskNarelle</Text>}
-        placement="left"
-        width={280}
-        open={menuOpen}
-        onClose={() => setMenuOpen(false)}
-      >
-        <Menu
-          mode="inline"
-          selectedKeys={[selectedKey]}
-          items={[
-            ...items,
-            { key: "signout", icon: <LogoutOutlined />, label: <SignOutButton /> },
-          ]}
-          onClick={() => setMenuOpen(false)}
-        />
-      </Drawer>
-    </>
-  );
-
-  if (AUTH_DISABLED) {
-    return <nav style={{ position: "fixed", top: 0, width: "100%", zIndex: 1000 }}>{fullNav}</nav>;
-  }
-
   return (
     <nav style={{ position: "fixed", top: 0, width: "100%", zIndex: 1000 }}>
-      <AuthenticatedTemplate>{fullNav}</AuthenticatedTemplate>
+      <AuthenticatedTemplate>
+        <Header
+          style={{
+            display: "flex",
+            alignItems: "center",
+            paddingInline: 16,
+            background: "#fff",
+            borderBottom: "1px solid #f0f0f0",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+          }}
+        >
+          <Link href="/" style={{ textDecoration: "none" }}>
+            <Text strong style={{ color: "#2C3463", fontSize: 20, marginRight: 16 }}>
+              AskNarelle
+            </Text>
+          </Link>
+
+          {screens.md ? (
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
+              <Menu
+                mode="horizontal"
+                selectedKeys={[selectedKey]}
+                items={items}
+                // no flex:1; keep it compact and right-aligned
+                style={{ borderBottom: "none" }}
+              />
+              <SignOutButton />
+            </div>
+          ) : (
+            <Button
+              type="text"
+              icon={<MenuOutlined style={{ fontSize: 20, color: "#2C3463" }} />}
+              onClick={() => setMenuOpen(true)}
+              style={{ marginLeft: "auto" }}
+            />
+          )}
+        </Header>
+
+        {/* Mobile Drawer unchanged */}
+        <Drawer
+          title={<Text strong style={{ color: "#2C3463", fontSize: 18 }}>AskNarelle</Text>}
+          placement="left"
+          width={280}
+          open={menuOpen}
+          onClose={() => setMenuOpen(false)}
+          // bodyStyle={{ padding: 0 }}
+        >
+          <Menu
+            mode="inline"
+            selectedKeys={[selectedKey]}
+            items={[
+              ...items,
+              { key: "signout", icon: <LogoutOutlined />, label: <SignOutButton /> },
+            ]}
+            onClick={() => setMenuOpen(false)}
+          />
+        </Drawer>
+      </AuthenticatedTemplate>
 
       <UnauthenticatedTemplate>
         <Header
