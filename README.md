@@ -244,6 +244,25 @@ a vCore cluster.
     Paste this connection string directly into the MONGO_URI field in your flask-server/.env file.
 
 -----------------------------------------------------------------------------------------------------
+
+------------------------------------------------------------------------------------------
+## Video Indexer IAM Config
+
+You need to assign a role to your Web App's managed identity on the Video Indexer resource. In the Azure Portal:
+
+Go to your Video Indexer resource (asknarelle-video-indexer)
+Click Access control (IAM) in the left sidebar
+Click + Add → Add role assignment
+Select the role Contributor (or a more specific role if available)
+Click Next, then choose Managed identity
+Click + Select members
+Filter by App Service, then select asknarelle-portal
+Click Select → Review + assign
+
+This allows ur web app to upload videos to video indexer later.
+-----------------------------------------------------------------------------------------------------
+
+
 ## 🗄 Database Initialization
 
 Download and use MongoDB Compass and connect to CosmosDB. 
