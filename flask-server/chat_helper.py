@@ -832,11 +832,14 @@ class ChatHelper:
                 "input": message,
                 "history": ""
             })
-            
+
+            if not answer or not answer.strip():
+                return None
+
             return answer
-            
+
         except Exception as e:
             logger.error(f"Raw Context Generation error: {e}")
-            return "Error generating response from the provided documents."
+            return None
 
 chat_client = ChatHelper()

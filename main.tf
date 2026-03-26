@@ -77,8 +77,15 @@ resource "azurerm_linux_web_app" "app" {
 
   site_config {
     application_stack {
-      python_version = "3.9" 
+      docker_registry_url      = "https://${azurerm_container_registry.acr.login_server}"
+      docker_image_name        = "unified:latest"
+      docker_registry_username = azurerm_container_registry.acr.admin_username
+      docker_registry_password = azurerm_container_registry.acr.admin_password
     }
+  }
+
+  app_settings = {
+    "WEBSITES_PORT" = "3000"
   }
 
   identity {

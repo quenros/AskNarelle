@@ -1248,10 +1248,13 @@ def process_document_microservice():
 
         # Feed the raw data to the new ChatHelper method
         answer = chat_client.generate_answer_from_raw_context(
-            message=question, 
+            message=question,
             raw_context=documents_context
         )
-        
+
+        if not answer:
+            return jsonify({"answer": "Unable to retrieve any relevant information"}), 200
+
         return jsonify({"answer": answer}), 200
 
     except Exception as e:
