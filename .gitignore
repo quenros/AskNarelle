@@ -4,6 +4,11 @@ __pycache__/
 
 # Ignore environment files
 .env
+*- Copy.env
+" - Copy.env"
+
+# Debug scripts
+flask-server/debug_*.py
 
 # Ignore virtual environment directories
 venv/

@@ -206,7 +206,7 @@ const DocumentPopup: React.FC<PopupProps> = ({
       ]}
       maskClosable={!loading}
       closable={!loading}
-      destroyOnClose
+      destroyOnHidden
     >
       <Space direction="vertical" style={{ width: "100%" }} size="middle">
         <Steps
@@ -243,11 +243,13 @@ const DocumentPopup: React.FC<PopupProps> = ({
 
         <Space direction="vertical" style={{ width: "100%" }}>
           <Text type="secondary">
-            {hasDocs
-              ? "1 document selected for vectorization."
-              : hasVideos 
-                ? "1 video selected for indexing."
-                : ""}
+            {hasDocs && hasVideos
+              ? `${docFiles.length} document(s) and ${videoFiles.length} video(s) selected.`
+              : hasDocs
+                ? `${docFiles.length} document(s) selected for vectorization.`
+                : hasVideos
+                  ? `${videoFiles.length} video(s) selected for indexing.`
+                  : ""}
           </Text>
         </Space>
       </Space>

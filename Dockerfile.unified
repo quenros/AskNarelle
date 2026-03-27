@@ -21,7 +21,7 @@ RUN npm run build
 # ==========================================
 # Stage 2: Final Monolithic Image (Python Base)
 # ==========================================
-FROM python:3.12-bullseye
+FROM python:3.12-slim-bullseye
 
 # Install Node.js in the Python image (so we can run the frontend)
 RUN apt-get update && apt-get install -y \

@@ -7,7 +7,6 @@ import { msalInstance } from "@/app/_app";
 export async function fetcher(...args: Parameters<typeof fetch>) {
   const headers = new Headers();
   const accessToken = await acquireGraphAccessToken();
-  console.log(accessToken)
   const bearer = `Bearer ${accessToken}`;
   headers.append("Authorization", bearer);
   const options = {

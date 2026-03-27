@@ -12,7 +12,6 @@ interface PieChartProps {
 }
 
 const EmotionsPieChart: React.FC<PieChartProps> =  ({ data }) => {
-    console.log(data)
     return(
         <div className="h-96">
             <ResponsivePie

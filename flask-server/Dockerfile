@@ -15,10 +15,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # --- CACHE FRIENDLY DEPENDENCIES ---
 COPY requirements.txt /tmp/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r /tmp/requirements.txt
+    pip install -r /tmp/requirements.txt
 
 # --- APP CODE AFTER DEPS ---
-COPY app.py ai_search_helper.py blob_storage_helper.py common_helper.py mongo_helper.py course_share_helper.py /flask-backend/
+COPY app.py ai_search_helper.py blob_storage_helper.py common_helper.py \
+     mongo_helper.py course_share_helper.py video_indexer_helper.py \
+     transcript_helper.py chat_helper.py model.py EmbeddingService.py \
+     loggingConfig.py utils.py /flask-backend/
 
 EXPOSE 5000
 CMD ["gunicorn", "app:app", "-b", "0.0.0.0:5000", "-w", "4", "--timeout", "600"]

@@ -5,7 +5,7 @@ import React from 'react';
 
 interface Document{
     _id: string;
-    uername: string;
+    username: string;
     course_name: string;
     domain: string;
     file: string;
@@ -53,7 +53,7 @@ const ActivityLogTable: React.FC<ActivityTableProps> = ({
           {activities.map((activity: Document, index: number) => (
             <tr key={index}>
               <td className="px-6 py-4 whitespace-nowrap">
-              <div className="text-sm text-[#7C8397] font-medium font-nunito">{activity.uername}</div>
+              <div className="text-sm text-[#7C8397] font-medium font-nunito">{activity.username}</div>
               </td>
               <td className="px-6 py-4 whitespace-nowrap">
                 <div className="text-sm text-[#7C8397] font-medium font-nunito">{activity.course_name}</div>

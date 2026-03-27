@@ -27,9 +27,7 @@ const DomainDeletionPopup: React.FC<DeletionPopupProps> = ({ onClose, onCourseDe
       body: JSON.stringify({ collectionName: courseName, domainName: domain, username: username}),
     })
     .then(response => {
-      if (response.status === 201) {
-        console.log('Domain deleted successfully')
-      } else if(!response.ok) {
+      if (!response.ok) {
         console.error('Failed to delete index');
       }
     })

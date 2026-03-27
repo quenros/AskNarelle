@@ -154,7 +154,6 @@ def moveToVectorStore():
     movement_status = moveToVectorStoreFunction(
         containername, domainname, chunksize, overlap, filename
     )
-    print(movement_status)
     if movement_status:
         return (
             jsonify({"message": "Data moved into into vectorstore successfully"}),
@@ -230,7 +229,7 @@ def create_domain():
 
             activities.append(
                 {
-                    "uername": username,
+                    "username": username,
                     "course_name": collection_name,
                     "domain": domain_name,
                     "file": "null",
@@ -274,7 +273,7 @@ def get_domains(username, collection_name):
         )
     elif domain_status == "404":
         return jsonify({"message": "This page is not available"}), 404
-    elif domain_status == "Flase":
+    elif domain_status == "False":
         return jsonify({"message": "Error fetch course domains"}), 500
     else:
         return jsonify(domain_status), 201
@@ -285,7 +284,6 @@ def get_domains(username, collection_name):
 )
 def get_files(username, collection_name, domain_name):
     documents_status = get_documents(username, collection_name, domain_name)
-    print(documents_status)
 
     # if we got a real list of docs back, attach fresh SAS URLs and return
     if isinstance(documents_status, list):
@@ -400,7 +398,6 @@ def upload_document(collection_name, domain_name, username):
 
     try:
         container_client = blob_service_client.get_container_client(container_name)
-        print(container_name)
 
         for file in files:
             # blob_path = f"{domain_name}/{file.filename}"
@@ -474,7 +471,7 @@ def upload_document(collection_name, domain_name, username):
 
             activities.append(
                 {
-                    "uername": username,
+                    "username": username,
                     "course_name": collection_name,
                     "domain": domain_name,
                     "file": file.filename,
@@ -520,9 +517,9 @@ def delete_course():
                     )
                 else:
                     return jsonify(
-                        {"message: Failed to delete the documents"}), 500
+                        {"message": "Failed to delete the documents"}), 500
             else:
-                return jsonify({"error": "Failed to delete contaier"}), 500
+                return jsonify({"error": "Failed to delete container"}), 500
         else:
             return jsonify({"error": "Failed to delete index"}), 500
 
@@ -543,7 +540,7 @@ def delete_domain():
             deletion_status = delete_embeddings_function(doc["name"], course_name)
             if not deletion_status:
                 return (
-                    jsonify({"message: Failed to delete embeddings"}),
+                    jsonify({"message": "Failed to delete embeddings"}),
                     500,
                 )
 
@@ -562,7 +559,7 @@ def delete_domain():
 
                 activities.append(
                     {
-                        "uername": username,
+                        "username": username,
                         "course_name": course_name,
                         "domain": domain_name,
                         "file": "null",
@@ -578,13 +575,13 @@ def delete_domain():
                     return jsonify({"message": "Domain deleted successfully!"}), 201
                 else:
                     return jsonify(
-                        {"message: Failed to add activity status"}), 500
+                        {"message": "Failed to add activity status"}), 500
 
             else:
                 return jsonify(
-                    {"message: Failed to delete the domain documents"}), 500
+                    {"message": "Failed to delete the domain documents"}), 500
         else:
-            return jsonify({"error": "Failed to delete contaier"}), 500
+            return jsonify({"error": "Failed to delete container"}), 500
     except Exception as error:
         return jsonify({"error": "Internal server error"}), 500
 
@@ -620,7 +617,7 @@ def delete_file(collection_name, domain_name):
 
                 activities.append(
                     {
-                        "uername": username,
+                        "username": username,
                         "course_name": container_name,
                         "domain": domain_name,
                         "file": file_name,
@@ -684,7 +681,7 @@ def update_movement():
 
             activities.append(
                 {
-                    "uername": username,
+                    "username": username,
                     "course_name": collection_name,
                     "domain": domain_name,
                     "file": file_name,
@@ -852,8 +849,6 @@ def invite_user():
             invite_response = requests.post(
                 invite_url, headers=headers, json=invite_body
             )
-            print(invite_response.text)
-            print(invite_response.status_code)
             if invite_response.status_code == 201:
                 upload_course(courseName, email)
                 return (
@@ -861,19 +856,16 @@ def invite_user():
                     201,
                 )
             else:
-                print(invite_response.json())
                 return (
                     jsonify({"error": invite_response.json()}),
                     invite_response.status_code,
                 )
     else:
-        print(user_response.json())
         return jsonify({"error": user_response.json()}), user_response.status_code
 
 
 @app.route("/activities/<username>/viewactivities", methods=["GET"])
 def get_activities(username):
-    print(username)
     activities = view_activities(username)
     if activities is not False:
         return jsonify(activities), 201
@@ -1099,17 +1091,10 @@ def chat_with_course(course_code):
         user_id = body.user_id # Extract user_id from body
 
         # 1. Search Documents (Azure AI Search)
-        print(f"Searching documents for course: {course_code}...")
         # Use a reasonable threshold (0.65 - 0.7) for ADA-002 models
         doc_matches = search_documents(course_code, message, top_k=3, score_threshold=8)
-        
-        # Log the matches found
-        print(f"Document matches found: {len(doc_matches)}")
-        for match in doc_matches:
-            print(f" - {match[:100]}...") # Print first 100 chars of each match
 
         if doc_matches:
-            print(f"Found {len(doc_matches)} document matches. Generating answer from docs...")
             answer = chat_client.generate_answer_from_docs(
                 context_list=doc_matches,
                 message=message,
@@ -1121,8 +1106,6 @@ def chat_with_course(course_code):
                 return jsonify({"answer": answer, "source": "documents"}), 200
         
         # 2. Fallback to Video Search
-        print("No sufficient document matches. Falling back to Video Indexer...")
-        
         if not target_video_ids:
             # Fetch all videos for the course from URL
             target_video_ids = get_all_video_ids_for_course(course_code)

@@ -1,8 +1,9 @@
 /** @type {import('next').NextConfig} */
+// All rewrites target 127.0.0.1:5000 — Flask runs on that address both locally
+// and inside the unified Docker container (start.sh binds gunicorn to 127.0.0.1:5000).
 const nextConfig = {
   async rewrites() {
     return [
-      // --- Existing Routes ---
       {
         source: '/api/:path*',
         destination: 'http://127.0.0.1:5000/api/:path*',

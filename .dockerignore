@@ -1,0 +1,31 @@
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+flask-server/.venv/
+flask-server/venv/
+
+# Node
+admin-app/node_modules/
+flask-server/node_modules/
+
+# Environment & secrets
+flask-server/.env
+**/.env
+
+# Terraform state
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# Git
+.git/
+**/.gitignore
+
+# OS
+**/.DS_Store
+
+# Misc
+flask-server/.chroma/
+flask-server/debug_*.py

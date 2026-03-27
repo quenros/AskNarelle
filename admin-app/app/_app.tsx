@@ -23,7 +23,6 @@ msalInstance.initialize().then(() => {
 
   msalInstance.addEventCallback((event: EventMessage) => {
     if (event.eventType === EventType.LOGIN_SUCCESS) {
-      console.log("login success")
       const payload = event.payload as AuthenticationResult; 
       if (payload.account) {
         msalInstance.setActiveAccount(payload.account);
