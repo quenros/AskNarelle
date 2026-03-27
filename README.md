@@ -7,14 +7,6 @@ base using Azure Cognitive Services and Large Language Models (LLMs).
 
 ------------------------------------------------------------------------
 
-## 🔗 Project Links
-
--   📹 Set Up Video
--   📄 FYP Report
--   📊 Presentation Slides
-
-------------------------------------------------------------------------
-
 ## 📑 Table of Contents
 
 -   Project Overview
