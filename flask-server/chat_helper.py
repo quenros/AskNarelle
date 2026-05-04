@@ -408,8 +408,8 @@ class ChatHelper:
         
         history_str = ""
         for m in recent_msgs:
-            role = "User" if m['role'] == 'user' else "Assistant"
-            history_str += f"{role}: {m['content']}\n"
+            role = "User" if m.get('role') == 'user' else "Assistant"
+            history_str += f"{role}: {m.get('content', '')}\n"
         return history_str
 
     def save_conversation_turn(self, course_code: str, user_msg: str, assistant_msg: str, user_id: str):
@@ -475,8 +475,8 @@ class ChatHelper:
                     if video_doc and video_doc.get("video_id"):
                         resolved_ids.append(video_doc["video_id"])
                         continue
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to resolve video ID {vid}: {e}")
             resolved_ids.append(vid)
             
         return list(set(resolved_ids))
@@ -527,8 +527,8 @@ class ChatHelper:
                 "index": self.vector_store.get_index_name(),
                 "path": "vectorContent",
                 "queryVector": self.embeddings.embed_query(query),
-                "numCandidates": 10,
-                "limit": 20,
+                "numCandidates": 50,
+                "limit": 10,
                 "filter": filter_query 
             }},
             {
@@ -674,49 +674,66 @@ class ChatHelper:
 
     def execute_search_strategy(self, query_variants: list, top_n: int = 5):
         all_retrieval_results = []
-        
+        all_meta_lookup = {}
+
         def process_variant(variant):
             vid_list = variant.get('video_ids', [])
             sub_query = variant.get('question', '')
             temporal = variant.get('temporal_signal', [])
-            
+
             logger.info(f"Processing Query Variant: '{sub_query}' on Videos: {vid_list}")
-            
+
             local_dicts = []
+            local_meta = {}
 
             # 1. Temporal Retrieval
             if temporal:
-                _, temp_dicts = self.retrieve_chunks_by_timestamp(vid_list, temporal)
+                temp_docs, temp_dicts = self.retrieve_chunks_by_timestamp(vid_list, temporal)
+                for d in temp_docs:
+                    if d.page_content and d.metadata:
+                        local_meta[d.page_content] = d.metadata
                 local_dicts.extend(temp_dicts)
 
             # 2. Hybrid Retrieval (Vector + Text)
             docs_sem = self.retrieve_semantic_multivid(vid_list, sub_query)
             docs_text = self.retrieve_text_multivid(vid_list, sub_query)
-            
+
+            # Capture metadata before normalising for RRF
+            for d in docs_sem:
+                if d.get("textContent") and d.get("metadata"):
+                    local_meta[d["textContent"]] = d["metadata"]
+            for d in docs_text:
+                if d.get("textContent") and d.get("metadata"):
+                    local_meta.setdefault(d["textContent"], d["metadata"])
+
             # Normalize for RRF
-            list_sem = [{"text": d["textContent"], "score": d.get("score",0)} for d in docs_sem]
-            list_text = [{"text": d["textContent"], "score": d.get("score",0)} for d in docs_text]
-            
+            list_sem = [{"text": d["textContent"], "score": d.get("score", 0)} for d in docs_sem]
+            list_text = [{"text": d["textContent"], "score": d.get("score", 0)} for d in docs_text]
+
             fused = weighted_reciprocal_rank([list_sem, list_text], weights=[1, 0.2])[:top_n]
-            
-            # Convert to dict format
+
             fused_dicts = [{"text": d.get("text"), "score": 1.0} for d in fused]
             local_dicts.extend(fused_dicts)
-            
-            return local_dicts
+
+            return local_dicts, local_meta
 
         # Parallel Execution
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(query_variants) or 1) as executor:
             futures = [executor.submit(process_variant, v) for v in query_variants]
             for future in concurrent.futures.as_completed(futures):
-                all_retrieval_results.extend(future.result())
+                dicts, local_meta = future.result()
+                all_retrieval_results.extend(dicts)
+                all_meta_lookup.update(local_meta)
 
-        # Deduplicate
+        # Deduplicate and restore metadata
         unique_results = {}
         for item in all_retrieval_results:
             unique_results[item['text']] = item
-            
-        final_docs = [Document(page_content=v['text']) for v in unique_results.values()]
+
+        final_docs = [
+            Document(page_content=v['text'], metadata=all_meta_lookup.get(v['text'], {}))
+            for v in unique_results.values()
+        ]
         logger.info(f"Final Context Documents Retrieved: {len(final_docs)}")
         return final_docs
 

@@ -42,7 +42,7 @@ const DocumentPopup: React.FC<PopupProps> = ({
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Steps: 0=Select, 1=Blob, 2=Vector, 3=Database / VI
+  // Steps: 0=Select, 1=Blob, 2=Database, 3=Vector / VI
   const [step, setStep] = useState(0);
 
   const docFiles = useMemo(
@@ -110,10 +110,7 @@ const DocumentPopup: React.FC<PopupProps> = ({
       })
     );
 
-    setStep(3); // Visual indication we are on the final step
-    
-    // Call the new Async Endpoint
-    await doFetch("/vi/videos", {
+    const resp = await doFetch("/vi/videos", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -123,6 +120,16 @@ const DocumentPopup: React.FC<PopupProps> = ({
         username: username,
       }),
     });
+
+    const result = await resp.json();
+    if (result.errors && result.errors.length > 0) {
+      const failedCount = result.errors.length;
+      const succeededCount = (result.registered ?? []).length;
+      message.warning(
+        `${succeededCount} video(s) queued for indexing. ${failedCount} failed to register — check console for details.`
+      );
+      console.error("VI registration errors:", result.errors);
+    }
   };
 
   const handleSubmit = async () => {
@@ -135,16 +142,23 @@ const DocumentPopup: React.FC<PopupProps> = ({
 
     try {
       const formData = buildFormData(fileList);
-      
-      //  Upload to Blob Storage
+
+      // 1) Upload to Blob Storage
       await doFetch(
         `/api/${collectionName}/${domainName}/${username}/createblob`,
         { method: "PUT", body: formData }
       );
 
-      //  DOCS to Vector Store
+      // 2) Create Document Records in MongoDB — must succeed before we vectorize
+      setStep(2);
+      await doFetch(
+        `/api/${collectionName}/${domainName}/${username}/createdocument`,
+        { method: "PUT", body: buildFormData(fileList) }
+      );
+
+      // 3) Vectorize docs + kick off VI — both run after DB write succeeds
+      setStep(3);
       if (hasDocs) {
-        setStep(2);
         await doFetch("/vectorstore", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -152,17 +166,10 @@ const DocumentPopup: React.FC<PopupProps> = ({
             containername: collectionName,
             domainname: domainName,
             chunksize: 1000,
-            overlap: 100, 
+            overlap: 100,
           }),
         });
       }
-
-      // 3) Create Document Records in MongoDB (Generic)
-      setStep(3);
-      await doFetch(
-        `/api/${collectionName}/${domainName}/${username}/createdocument`,
-        { method: "PUT", body: buildFormData(fileList) }
-      );
 
       if (hasVideos) {
         await uploadVideosViaVI();
@@ -215,8 +222,8 @@ const DocumentPopup: React.FC<PopupProps> = ({
           items={[
             { title: "Select" },
             { title: "Blob" },
-            { title: "Vector" },
-            { title: "Database / VI" },
+            { title: "Database" },
+            { title: "Vector / VI" },
           ]}
         />
 

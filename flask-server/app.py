@@ -358,7 +358,7 @@ def upload_blob(collection_name, domain_name, username):
     files = request.files.getlist("files")
     container_name = collection_name.lower().replace(" ", "-")
     allowed_doc_exts = {".pdf", ".docx", ".txt", ".pptx", ".csv", ".xlsx"}
-    allowed_video_exts = {".mp4", ".mov", ".avi", ".mkv"}
+    allowed_video_exts = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
     allowed_extensions = allowed_doc_exts | allowed_video_exts
 
     for file in files:
@@ -932,6 +932,8 @@ def vi_upload_videos():
 
     if not course_code:
         return jsonify({"error": "courseCode is required"}), 400
+    if not domain_name:
+        return jsonify({"error": "domainName is required"}), 400
     if not isinstance(videos, list) or len(videos) == 0:
         return jsonify({"error": "video must be a non-empty list"}), 400
 
@@ -1090,8 +1092,7 @@ def chat_with_course(course_code):
         message = body.message
         user_id = body.user_id # Extract user_id from body
 
-        # 1. Search Documents (Azure AI Search)
-        # Use a reasonable threshold (0.65 - 0.7) for ADA-002 models
+        # 1. Search Documents (Azure AI Search) — BM25 keyword search, threshold is a raw BM25 score
         doc_matches = search_documents(course_code, message, top_k=3, score_threshold=8)
 
         if doc_matches:

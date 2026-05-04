@@ -5,7 +5,7 @@ export const msalConfig = {
         clientId: "e0a0692d-739b-46b0-bc9e-3561f3d44800",
         // SINGLE TENANT: Use your specific Tenant ID (0714...)
         authority: "https://login.microsoftonline.com/0714d781-75cf-4091-80d4-3aacfd1acc4f", // your tenant ID
-        
+            
         // Redirect URI: Uses Env Var in Azure, or localhost for dev
         redirectUri: process.env.NEXT_PUBLIC_REDIRECT_URI || "http://localhost:3000/",
     },
