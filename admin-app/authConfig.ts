@@ -6,8 +6,8 @@ export const msalConfig = {
         // SINGLE TENANT: Use your specific Tenant ID (0714...)
         authority: "https://login.microsoftonline.com/0714d781-75cf-4091-80d4-3aacfd1acc4f", // your tenant ID
             
-        // Redirect URI: Uses Env Var in Azure, or localhost for dev
-        redirectUri: process.env.NEXT_PUBLIC_REDIRECT_URI || "http://localhost:3000/",
+        // Dynamically use the current origin so it works for both local and deployed URLs
+        redirectUri: typeof window !== "undefined" ? window.location.origin + "/" : "http://localhost:3000/",
     },
     cache: {
         cacheLocation: "sessionStorage",

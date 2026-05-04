@@ -52,9 +52,9 @@ COPY --from=frontend-builder /app/frontend/package.json ./frontend/package.json
 COPY --from=frontend-builder /app/frontend/next.config.mjs ./frontend/
 
 # --- Setup Nginx ---
-# Copy startup script
+# Copy startup script and strip Windows line endings
 COPY start.sh .
-RUN chmod +x start.sh
+RUN sed -i 's/\r$//' start.sh && chmod +x start.sh
 
 # Environment variables
 ENV PORT=3000
