@@ -10,8 +10,8 @@ admin-app/node_modules/
 flask-server/node_modules/
 
 # Environment & secrets
-flask-server/.env
-**/.env
+# NOTE: .env is intentionally included in the build for deployment
+# **/.env
 
 # Terraform state
 .terraform/
